@@ -1,0 +1,33 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "threads-lead-bot-webhook",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-13",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    // Enable only while capturing a real Meta test event. Raw payloads can contain personal data.
+    "LOG_WEBHOOK_PAYLOADS": "false",
+    "THREADS_APP_ID": "963373790065034",
+    "THREADS_OAUTH_REDIRECT_URI": "https://threads-lead-bot-webhook.aspanfx.workers.dev/oauth/callback"
+  },
+  "secrets": {
+    "required": [
+      "META_APP_SECRET",
+      "META_WEBHOOK_VERIFY_TOKEN",
+      "SUPABASE_URL",
+      "SUPABASE_SERVICE_ROLE_KEY"
+    ]
+  },
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "invocation_logs": true
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 0.1
+    }
+  }
+}

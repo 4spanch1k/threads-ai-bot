@@ -1,0 +1,4 @@
+META_APP_SECRET=replace-me
+META_WEBHOOK_VERIFY_TOKEN=replace-me
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=replace-me

@@ -1,0 +1,12 @@
+[
+  { "query": "нужен сайт", "search_type": "RECENT", "search_mode": "KEYWORD" },
+  { "query": "ищу разработчика", "search_type": "RECENT", "search_mode": "KEYWORD" },
+  { "query": "кто сделает сайт", "search_type": "RECENT", "search_mode": "KEYWORD" },
+  { "query": "нужен интернет-магазин", "search_type": "RECENT", "search_mode": "KEYWORD" },
+  { "query": "нужно приложение", "search_type": "RECENT", "search_mode": "KEYWORD" },
+  { "query": "нужна автоматизация", "search_type": "RECENT", "search_mode": "KEYWORD" },
+  { "query": "сайт керек", "search_type": "RECENT", "search_mode": "KEYWORD" },
+  { "query": "әзірлеуші іздеймін", "search_type": "RECENT", "search_mode": "KEYWORD" },
+  { "query": "веб-разработка", "search_type": "RECENT", "search_mode": "TAG" },
+  { "query": "малый бизнес", "search_type": "RECENT", "search_mode": "TAG" }
+]
