@@ -7,7 +7,7 @@
   "vars": {
     // Enable only while capturing a real Meta test event. Raw payloads can contain personal data.
     "LOG_WEBHOOK_PAYLOADS": "false",
-    "THREADS_APP_ID": "963373790065034",
+    "THREADS_APP_ID": "2447699752420211",
     "THREADS_OAUTH_REDIRECT_URI": "https://threads-lead-bot-webhook.aspanfx.workers.dev/oauth/callback"
   },
   "secrets": {

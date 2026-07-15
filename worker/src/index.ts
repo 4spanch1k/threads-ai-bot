@@ -286,6 +286,117 @@ function escapeHtml(value: string): string {
     .replace(/'/g, "&#039;");
 }
 
+function privacyPolicyPage(): string {
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Privacy Policy for the Mononyxx Threads Lead Bot.">
+  <title>Privacy Policy · Mononyxx Threads Lead Bot</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #0a0c0f; color: #eef2f7; }
+    main { width: min(820px, calc(100% - 32px)); margin: 0 auto; padding: 72px 0 88px; }
+    header { padding-bottom: 32px; border-bottom: 1px solid #28303a; }
+    .eyebrow { margin: 0 0 12px; color: #8ea0b5; font-size: 13px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+    h1 { margin: 0; font-size: clamp(36px, 7vw, 58px); line-height: 1.05; letter-spacing: -.04em; }
+    .updated { margin: 18px 0 0; color: #9ba9b8; }
+    section { padding-top: 32px; }
+    h2 { margin: 0 0 12px; font-size: 22px; letter-spacing: -.02em; }
+    p, li { color: #bcc6d2; font-size: 16px; line-height: 1.7; }
+    p { margin: 0; }
+    ul { margin: 12px 0 0; padding-left: 22px; }
+    li + li { margin-top: 8px; }
+    a { color: #a9d3ff; text-underline-offset: 3px; }
+    a:focus-visible { outline: 3px solid #75baff; outline-offset: 4px; border-radius: 4px; }
+    footer { margin-top: 48px; padding-top: 24px; border-top: 1px solid #28303a; color: #7f8e9f; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <p class="eyebrow">Mononyxx · Threads Lead Bot</p>
+      <h1>Privacy Policy</h1>
+      <p class="updated">Last updated: July 15, 2026</p>
+    </header>
+
+    <section>
+      <h2>1. About this service</h2>
+      <p>Mononyxx operates the Threads Lead Bot to help manage content, replies, mentions, and potential customer enquiries connected to the Mononyxx Threads profile.</p>
+    </section>
+
+    <section>
+      <h2>2. Information we process</h2>
+      <p>When the service is connected to Threads, we may process:</p>
+      <ul>
+        <li>Threads account identifiers and usernames;</li>
+        <li>post, thread, reply, and mention identifiers;</li>
+        <li>the text of replies or mentions and related timestamps;</li>
+        <li>classification results, delivery status, and technical logs needed to operate and secure the service.</li>
+      </ul>
+      <p>We do not ask for or store your Threads password.</p>
+    </section>
+
+    <section>
+      <h2>3. How we use information</h2>
+      <p>We use this information to receive and organize Threads interactions, identify relevant enquiries, prepare or publish permitted responses, send internal notifications, prevent duplicate processing, troubleshoot errors, and protect the service from abuse.</p>
+    </section>
+
+    <section>
+      <h2>4. Service providers</h2>
+      <p>Information may be processed by Meta Threads, Cloudflare, Supabase, GitHub Actions, Telegram, and Groq where required for the functions described above. Groq receives selected interaction text only when automated classification is needed. These providers process data under their own terms and privacy commitments.</p>
+    </section>
+
+    <section>
+      <h2>5. Sharing and sale</h2>
+      <p>We do not sell personal information. We disclose information only to the service providers required to operate the bot, when you request it, or when required by law.</p>
+    </section>
+
+    <section>
+      <h2>6. Retention and security</h2>
+      <p>We keep information only for as long as reasonably necessary to operate the service, resolve errors, meet legal obligations, and protect legitimate business interests. We use access controls, secret management, signed webhook verification, and other reasonable safeguards. No online system can guarantee absolute security.</p>
+    </section>
+
+    <section>
+      <h2>7. Your choices and deletion requests</h2>
+      <p>You may disconnect the application through your Threads or Meta account settings. To request access to or deletion of information associated with your Threads account, contact us on <a href="https://wa.me/77089508019" rel="noreferrer">WhatsApp</a>. Please include your Threads username so we can identify the relevant records. We may ask you to verify your request.</p>
+    </section>
+
+    <section>
+      <h2>8. Changes to this policy</h2>
+      <p>We may update this policy when the service or legal requirements change. The latest version and its effective date will remain available at this URL.</p>
+    </section>
+
+    <section>
+      <h2>9. Contact</h2>
+      <p>For privacy questions, contact Mononyxx through <a href="https://wa.me/77089508019" rel="noreferrer">WhatsApp: +7 708 950 8019</a>.</p>
+    </section>
+
+    <footer>Mononyxx · Threads Lead Bot</footer>
+  </main>
+</body>
+</html>`;
+}
+
+function handlePrivacyPolicy(request: Request): Response {
+  if (request.method !== "GET") {
+    return new Response(null, { status: 405, headers: { Allow: "GET" } });
+  }
+
+  return new Response(privacyPolicyPage(), {
+    status: 200,
+    headers: {
+      "Cache-Control": "public, max-age=3600",
+      "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+      "Content-Type": "text/html; charset=utf-8",
+      "Referrer-Policy": "no-referrer",
+      "X-Content-Type-Options": "nosniff",
+    },
+  });
+}
+
 async function jsonRecord(response: Response): Promise<JsonRecord> {
   if (!response.ok) {
     throw new Error(`Meta OAuth request failed (${response.status})`);
@@ -697,6 +808,9 @@ export default {
           return await handleWebhook(request, env);
         }
         return new Response(null, { status: 405, headers: { Allow: "GET, POST" } });
+      }
+      if (url.pathname === "/privacy") {
+        return handlePrivacyPolicy(request);
       }
       if (url.pathname === "/oauth/start") {
         return await handleOAuthStart(request, env);

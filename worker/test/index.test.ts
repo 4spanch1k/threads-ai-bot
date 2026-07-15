@@ -47,6 +47,26 @@ async function signedRequest(payload: Record<string, unknown>): Promise<string> 
 }
 
 describe("Threads webhook Worker", () => {
+  it("serves a public privacy policy", async () => {
+    const response = await worker.fetch(new Request("https://worker.example/privacy"), env);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    expect(response.headers.get("content-security-policy")).toContain("default-src 'none'");
+    const page = await response.text();
+    expect(page).toContain("Privacy Policy");
+    expect(page).toContain("https://wa.me/77089508019");
+  });
+
+  it("rejects non-GET privacy policy requests", async () => {
+    const response = await worker.fetch(new Request("https://worker.example/privacy", {
+      method: "POST",
+    }), env);
+
+    expect(response.status).toBe(405);
+    expect(response.headers.get("allow")).toBe("GET");
+  });
+
   it("starts OAuth with a signed state and secure nonce cookie", async () => {
     const response = await worker.fetch(new Request("https://worker.example/oauth/start"), env);
 
