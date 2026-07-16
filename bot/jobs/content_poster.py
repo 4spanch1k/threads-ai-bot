@@ -1,12 +1,16 @@
 from __future__ import annotations
 
-from bot.config import SupabaseSettings, ThreadsSettings, env_int
+from bot.config import SupabaseSettings, ThreadsSettings, env_bool, env_int
 from bot.jobs.common import log, utc_now
 from bot.supabase import SupabaseClient
 from bot.threads import ThreadsClient
 
 
 def main() -> None:
+    if env_bool("SHADOW_MODE", True):
+        log("content publishing skipped in shadow mode")
+        return
+
     batch_size = env_int("CONTENT_BATCH_SIZE", 5, maximum=50)
     max_attempts = env_int("MAX_ATTEMPTS", 5, maximum=20)
     database = SupabaseClient(SupabaseSettings.from_env())

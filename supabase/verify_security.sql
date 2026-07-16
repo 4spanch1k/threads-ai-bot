@@ -75,6 +75,30 @@ begin
     end if;
   end loop;
 
+  -- The Cron helper is optional until its migration is applied. When present it
+  -- must remain inaccessible to every Data API role, including service_role.
+  function_signature := 'private.invoke_edge_function(text)';
+  function_oid := to_regprocedure(function_signature);
+  if function_oid is not null then
+    foreach role_name in array array['anon', 'authenticated', 'service_role'] loop
+      if has_schema_privilege(role_name, 'private', 'USAGE') then
+        raise exception 'Role % unexpectedly has USAGE on schema private', role_name;
+      end if;
+      if has_function_privilege(role_name, function_oid, 'EXECUTE') then
+        raise exception 'Role % unexpectedly has EXECUTE on %', role_name, function_signature;
+      end if;
+    end loop;
+
+    if not exists (
+      select 1
+      from pg_catalog.pg_proc
+      where oid = function_oid
+        and prosecdef = true
+    ) then
+      raise exception 'Cron helper % must be SECURITY DEFINER', function_signature;
+    end if;
+  end if;
+
   raise notice 'Threads Lead Bot security gate passed';
 end;
 $verify$;

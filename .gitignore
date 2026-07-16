@@ -13,3 +13,4 @@ __pycache__/
 node_modules/
 worker/.wrangler/
 worker/dist/
+supabase/.temp/

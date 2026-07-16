@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "lib": ["deno.ns", "dom", "dom.iterable", "esnext"]
+  },
+  "fmt": {
+    "lineWidth": 100
+  },
+  "tasks": {
+    "check": "deno check interaction-processor/index.ts content-poster/index.ts keyword-radar/index.ts tests/*.ts",
+    "test": "deno test --allow-env --allow-read=../../config/keywords.json tests"
+  }
+}
