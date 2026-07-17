@@ -3,7 +3,11 @@ import {
   pickContentAngle,
   planContentSlots,
 } from "../content-generator/job.ts";
-import { assertGeneratedCopy, assertGeneratedPostCopy } from "../_shared/groq.ts";
+import {
+  assertGeneratedCopy,
+  assertGeneratedPostCopy,
+  POST_GENERATION_SYSTEM_PROMPT,
+} from "../_shared/groq.ts";
 import type { ContentProfile } from "../_shared/types.ts";
 import { assertEquals, assertRejects } from "./assert.ts";
 
@@ -101,6 +105,13 @@ Deno.test("copy guard accepts confirmed prices with the required qualifier", () 
   );
 });
 
+Deno.test("copy guard accepts a confirmed non-price number without the price qualifier", () => {
+  assertGeneratedCopy(
+    "За неделю вручную разобрали 3 обращения и нашли повторяющийся вопрос.",
+    `${BUSINESS_CONTEXT}\nЗа неделю вручную разобрали 3 обращения.`,
+  );
+});
+
 Deno.test("copy guard accepts approved Latin brand names", () => {
   assertGeneratedCopy(
     "AI-автоматизация и WhatsApp-бот помогают разбирать обращения из Instagram.",
@@ -145,9 +156,17 @@ Deno.test("copy guard rejects banned AI wording", async () => {
 
 Deno.test("post copy guard accepts useful copy without a price", () => {
   assertGeneratedPostCopy(
-    "Если на первом экране непонятно, чем занимается компания, посетителю приходится угадывать. Проверьте заголовок: он должен отвечать на этот вопрос сразу.",
+    "Если на первом экране непонятно, чем занимается компания, посетителю приходится угадывать. Ваш заголовок отвечает на этот вопрос сразу?",
     BUSINESS_CONTEXT,
     "признаки сайта, который не вызывает доверия у клиента",
+  );
+});
+
+Deno.test("post copy guard accepts a confirmed non-price number in a regular angle", () => {
+  assertGeneratedPostCopy(
+    "За неделю вручную разобрали 3 обращения и нашли повторяющийся вопрос. Какой вопрос чаще всего задают вам?",
+    `${BUSINESS_CONTEXT}\nЗа неделю вручную разобрали 3 обращения.`,
+    "повторяющиеся вопросы клиентов до автоматизации",
   );
 });
 
@@ -177,7 +196,7 @@ Deno.test("post copy guard rejects prices outside a price-focused angle", async 
 
 Deno.test("post copy guard accepts prices in a price-focused angle", () => {
   assertGeneratedPostCopy(
-    "Лендинг начинается от 49 990 ₸, а многостраничный сайт — от 89 990 ₸. Выбор зависит от количества услуг и нужной структуры.",
+    "Лендинг начинается от 49 990 ₸, а многостраничный сайт — от 89 990 ₸. Какая структура нужна вашему бизнесу?",
     BUSINESS_CONTEXT,
     "ответ на сомнение о стоимости цифрового продукта",
   );
@@ -240,5 +259,109 @@ Deno.test("post copy guard rejects ambiguous bot-hours wording", async () => {
         "процессы и ограничения до запуска бизнес-бота",
       ),
     "ambiguous bot-hours phrase",
+  );
+});
+
+Deno.test("post generator prompt requires varied hooks and a human voice", () => {
+  for (
+    const requirement of [
+      "Первая фраза — хук",
+      "не повторяй тип хука самого свежего поста",
+      "реальная личная история",
+      "прямой вопрос аудитории",
+      "подтверждённое конкретное число",
+      "Пиши голосом живого человека",
+      "Не пиши «Mononyx предлагает»",
+    ]
+  ) {
+    assertEquals(POST_GENERATION_SYSTEM_PROMPT.includes(requirement), true);
+  }
+});
+
+Deno.test("post generator prompt requires one comment CTA and forbids unsupported promises", () => {
+  for (
+    const requirement of [
+      "ровно один явный CTA",
+      "ответить в комментариях",
+      "Хук не должен быть кликбейтом",
+      "Не обещай позиции или топ в Google",
+      "Не гарантируй сроки",
+      "юридических и финансовых гарантий",
+      "отдельная статья расходов",
+    ]
+  ) {
+    assertEquals(POST_GENERATION_SYSTEM_PROMPT.includes(requirement), true);
+  }
+});
+
+Deno.test("post copy guard requires a final comment question", async () => {
+  await assertRejects(
+    () =>
+      assertGeneratedPostCopy(
+        "На первом экране сразу покажите услугу и способ связаться.",
+        BUSINESS_CONTEXT,
+        "аудит первого экрана сайта",
+      ),
+    "comment-oriented question",
+  );
+});
+
+Deno.test("post copy guard rejects off-platform CTA", async () => {
+  await assertRejects(
+    () =>
+      assertGeneratedPostCopy(
+        "Форма записи спрятана внизу страницы. Напишите мне в WhatsApp?",
+        BUSINESS_CONTEXT,
+        "аудит первого экрана сайта",
+      ),
+    "off-platform or subscription CTA",
+  );
+});
+
+Deno.test("post copy guard rejects promised Google ranking", async () => {
+  await assertRejects(
+    () =>
+      assertGeneratedPostCopy(
+        "Мы выведем ваш сайт в топ Google. Что мешает вам начать?",
+        BUSINESS_CONTEXT,
+        "как сайт поддерживает цифровой статус компании",
+      ),
+    "search ranking",
+  );
+});
+
+Deno.test("post copy guard rejects guaranteed delivery timeline", async () => {
+  await assertRejects(
+    () =>
+      assertGeneratedPostCopy(
+        "Гарантируем срок разработки. Какой проект вы планируете?",
+        BUSINESS_CONTEXT,
+        "подготовка к заказу сайта",
+      ),
+    "delivery timeline",
+  );
+});
+
+Deno.test("post copy guard rejects legal or financial guarantees", async () => {
+  await assertRejects(
+    () =>
+      assertGeneratedPostCopy(
+        "Даём финансовую гарантию окупаемости. Хотите обсудить проект?",
+        BUSINESS_CONTEXT,
+        "что проверить до заказа автоматизации",
+      ),
+    "legal or financial guarantee",
+  );
+});
+
+Deno.test("post copy guard rejects guaranteed ROI", async () => {
+  await assertRejects(
+    () =>
+      assertGeneratedPostCopy(
+        "Гарантируем ROI после запуска сайта. Что хотите улучшить?",
+        BUSINESS_CONTEXT,
+        "что проверить до заказа сайта",
+      ),
+    "guarantees an uncontrolled business outcome",
   );
 });

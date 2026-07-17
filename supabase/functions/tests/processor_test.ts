@@ -68,6 +68,40 @@ Deno.test("medium and high own-post leads qualify for automatic replies", () => 
   assertEquals(shouldReply(interaction(), { ...lead, confidenceLevel: "medium" }), true);
 });
 
+Deno.test("live lead notification sounds like a human assistant", async () => {
+  const sentReplies: string[] = [];
+  const sentNotifications: string[] = [];
+
+  await processInteraction(interaction(), {
+    classifier: { classify: () => Promise.resolve(lead) },
+    database: {
+      updateInteraction: () => Promise.resolve(),
+    },
+    shadowMode: false,
+    threads: {
+      reply: (_replyToId, text) => {
+        sentReplies.push(text);
+        return Promise.resolve("reply-id");
+      },
+    },
+    telegram: {
+      send: (text) => {
+        sentNotifications.push(text);
+        return Promise.resolve();
+      },
+    },
+  });
+
+  assertEquals(sentReplies, ["Давайте обсудим задачу"]);
+  assertEquals(sentNotifications, [
+    [
+      "Новый лид из Threads 👀",
+      "@customer написал:\n«Нужен сайт»",
+      "Я ответил ему и отправил к вам в WhatsApp.",
+    ].join("\n\n"),
+  ]);
+});
+
 Deno.test("low-confidence leads and engagement comments are ignored", () => {
   assertEquals(shouldReply(interaction(), { ...lead, confidenceLevel: "low" }), false);
   assertEquals(

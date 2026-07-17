@@ -57,15 +57,29 @@ export function shouldNotify(classification: Classification): boolean {
 
 function alertText(interaction: InteractionRow, classification: Classification): string {
   const username = interaction.username ? `@${interaction.username}` : "неизвестный пользователь";
-  const risks = classification.riskFlags.length > 0 ? classification.riskFlags.join(", ") : "нет";
+  const personText = `${username} написал:\n«${interaction.comment_text.trim()}»`;
+
+  if (shouldReply(interaction, classification)) {
+    return [
+      "Новый лид из Threads 👀",
+      personText,
+      "Я ответил ему и отправил к вам в WhatsApp.",
+    ].join("\n\n");
+  }
+
+  if (interaction.source === "keyword_search") {
+    return [
+      "Нашёл потенциального лида в Threads 👀",
+      personText,
+      "Я не отвечал ему автоматически. Посмотрите публикацию вручную.",
+    ].join("\n\n");
+  }
+
   return [
-    "Threads Lead Bot",
-    `Источник: ${interaction.source}`,
-    `Пользователь: ${username}`,
-    `Класс: ${classification.intent} / ${classification.confidenceLevel}`,
-    `Риски: ${risks}`,
-    `Текст: ${interaction.comment_text}`,
-  ].join("\n");
+    "Нужна ваша помощь с комментарием в Threads",
+    personText,
+    "Я не стал отвечать автоматически — комментарий лучше проверить вручную.",
+  ].join("\n\n");
 }
 
 export async function processInteraction(
