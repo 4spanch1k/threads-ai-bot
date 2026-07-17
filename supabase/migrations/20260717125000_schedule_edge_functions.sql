@@ -1,7 +1,3 @@
--- Run only after both Vault secrets exist:
---   project_url = https://<project-ref>.supabase.co
---   cron_secret = the same value as the Edge Function CRON_SECRET
-
 do $setup$
 declare
   v_missing_secret text;
@@ -67,8 +63,3 @@ begin
   );
 end
 $setup$;
-
-select jobid, jobname, schedule, active
-from cron.job
-where jobname like 'threads-%'
-order by jobname;

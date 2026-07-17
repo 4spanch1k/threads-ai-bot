@@ -1,4 +1,4 @@
-import type { ContentRow, InteractionRow } from "./types.ts";
+import type { ContentProfile, ContentRow, InteractionRow } from "./types.ts";
 
 interface RequestOptions {
   method?: string;
@@ -110,5 +110,62 @@ export class SupabaseRestClient {
       body: values,
       prefer: "resolution=ignore-duplicates,return=minimal",
     });
+  }
+
+  async insertInteractionsIfAbsent(values: Record<string, unknown>[]): Promise<number> {
+    if (values.length === 0) return 0;
+    const inserted = await this.request<Array<{ id: string }>>(
+      "interactions?on_conflict=source_item_id&select=id",
+      {
+        method: "POST",
+        body: values,
+        prefer: "resolution=ignore-duplicates,return=representation",
+      },
+    );
+    return inserted.length;
+  }
+
+  async getActiveContentProfile(): Promise<ContentProfile | null> {
+    const rows = await this.request<ContentProfile[]>(
+      "content_profiles?is_active=eq.true&select=id,business_context,target_audience,tone_of_voice,publish_times_utc&limit=1",
+    );
+    return rows[0] ?? null;
+  }
+
+  async getRecentContentTexts(limit = 10): Promise<string[]> {
+    const rows = await this.request<Array<{ text: string }>>(
+      [
+        "content_queue?status=in.(draft,scheduled,publishing,published)",
+        "select=text",
+        "order=created_at.desc",
+        `limit=${Math.max(1, Math.min(limit, 25))}`,
+      ].join("&"),
+    );
+    return rows.map((row) => row.text);
+  }
+
+  async getFutureGeneratedKeys(from: string, until: string): Promise<string[]> {
+    const rows = await this.request<Array<{ generation_key: string }>>(
+      [
+        "content_queue?origin=eq.ai_generated",
+        "generation_key=not.is.null",
+        `scheduled_at=gte.${encodeURIComponent(from)}`,
+        `scheduled_at=lte.${encodeURIComponent(until)}`,
+        "select=generation_key",
+      ].join("&"),
+    );
+    return rows.map((row) => row.generation_key);
+  }
+
+  async insertGeneratedContent(values: Record<string, unknown>): Promise<boolean> {
+    const inserted = await this.request<Array<{ id: string }>>(
+      "content_queue?on_conflict=generation_key&select=id",
+      {
+        method: "POST",
+        body: values,
+        prefer: "resolution=ignore-duplicates,return=representation",
+      },
+    );
+    return inserted.length > 0;
   }
 }

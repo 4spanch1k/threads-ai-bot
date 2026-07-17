@@ -6,7 +6,9 @@ begin
     select jobid
     from cron.job
     where jobname in (
+      'threads-interaction-poller',
       'threads-interaction-processor',
+      'threads-content-generator',
       'threads-content-poster',
       'threads-keyword-radar'
     )

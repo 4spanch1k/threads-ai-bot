@@ -7,7 +7,7 @@
     "lineWidth": 100
   },
   "tasks": {
-    "check": "deno check interaction-processor/index.ts content-poster/index.ts keyword-radar/index.ts tests/*.ts",
+    "check": "deno check interaction-poller/index.ts interaction-processor/index.ts content-generator/index.ts content-poster/index.ts keyword-radar/index.ts tests/*.ts",
     "test": "deno test --allow-env --allow-read=../../config/keywords.json tests"
   }
 }

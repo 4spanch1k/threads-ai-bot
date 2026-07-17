@@ -5,17 +5,19 @@
 ## Архитектура
 
 ```text
-Meta webhook -> Cloudflare Worker -> Supabase interactions/content_queue
-                                             |
-                                      Supabase Cron
-                                             |
-                                  Supabase Edge Functions
-                         processor / poster / keyword radar
-                                             |
-                              Groq / Threads / Telegram
+Meta webhook -> Cloudflare Worker --------------------+
+                                                      |
+Supabase Cron -> Threads polling fallback ------------+-> Supabase interactions
+                                                      |           |
+                                                      |    Interaction Processor
+                                                      |           |
+                                                      +-> Groq / Threads / Telegram
+
+Supabase Cron -> Content Generator -> content_queue -> Content Poster -> Threads
+Supabase Cron -> Keyword Radar -------------------------------> Supabase
 ```
 
-Cloudflare Worker только проверяет подпись и выполняет идемпотентный ingestion. Supabase Cron запускает короткоживущие Edge Functions. Python-задания и GitHub Actions сохранены как ручной резерв, но автоматических GitHub-расписаний нет.
+Cloudflare Worker остаётся основным проверенным ingestion-каналом. `interaction-poller` — резерв на случай, если Meta не доставляет production webhook: он раз в 5 минут читает replies к пяти последним собственным публикациям и mentions через официальный Threads API. Оба канала используют одинаковые детерминированные `source_item_id`, поэтому повторное получение события не создаёт дубль и не откатывает его статус. Supabase Cron запускает короткоживущие Edge Functions. Python-задания и GitHub Actions сохранены как ручной резерв, но автоматических GitHub-расписаний нет.
 
 ## Структура
 
@@ -95,6 +97,7 @@ TELEGRAM_CHAT_ID=<id>
 WHATSAPP_CONTACT_LINK=https://wa.me/77000000000
 SHADOW_MODE=true
 OWN_THREADS_USERNAME=mononyx
+CONTENT_GENERATION_BATCH_SIZE=7
 ```
 
 Не присылайте значения в чат и не вводите секрет прямо в аргумент команды. Загрузите файл целиком:
@@ -105,10 +108,12 @@ npx supabase secrets set --env-file supabase/.env.functions
 
 `SUPABASE_URL` и `SUPABASE_SERVICE_ROLE_KEY` Supabase автоматически предоставляет размещённым Edge Functions. Не добавляйте service role key в клиентский код.
 
-Задеплойте три функции:
+Задеплойте пять функций:
 
 ```bash
+npx supabase functions deploy interaction-poller --no-verify-jwt
 npx supabase functions deploy interaction-processor --no-verify-jwt
+npx supabase functions deploy content-generator --no-verify-jwt
 npx supabase functions deploy content-poster --no-verify-jwt
 npx supabase functions deploy keyword-radar --no-verify-jwt
 ```
@@ -124,7 +129,9 @@ npx supabase functions deploy keyword-radar --no-verify-jwt
 
 Не помещайте значения в репозиторий или чат. После создания секретов выполните `supabase/cron_setup.sql` в SQL Editor. Скрипт проверит Vault, заменит только расписания этого проекта и установит:
 
-- Interaction Processor — на 7/17/27/37/47/57 минуте;
+- Interaction Poller — каждые 5 минут, начиная с 1-й минуты часа;
+- Interaction Processor — каждые 5 минут, через минуту после poller;
+- Content Generator — каждые 6 часов на 39-й минуте;
 - Content Poster — на 13/28/43/58 минуте;
 - Keyword Radar — каждые 3 часа на 23-й минуте.
 
@@ -138,11 +145,21 @@ select private.invoke_edge_function('interaction-processor');
 
 Ожидаемый результат — числовой request id, затем запись `job_complete` в логах функции. Сам `CRON_SECRET` в логи не выводится.
 
+Для отдельной проверки polling fallback вызовите:
+
+```sql
+select private.invoke_edge_function('interaction-poller');
+```
+
+Poller не классифицирует события и не выполняет внешних действий. Он только вставляет новые `reply:<id>` и `mention:<id>` в `interactions`; обработка остаётся в существующем processor. При расписании из `cron_setup.sql` типичная задержка между новым комментарием и запуском processor составляет 1–6 минут. Poller ограничен пятью последними собственными публикациями и 50 свежими событиями на запрос, чтобы не расходовать API-вызовы без необходимости.
+
 ## 5. Shadow mode
 
 Пока `SHADOW_MODE=true`:
 
+- interaction poller читает replies/mentions и безопасно сохраняет только новые события;
 - processor сохраняет классификацию и черновик, но не отвечает в Threads и не отправляет Telegram;
+- content generator создаёт только черновики AI-постов и не планирует их публикацию;
 - content poster не получает задания из очереди и ничего не публикует;
 - keyword radar только читает публичный поиск и сохраняет найденные посты;
 - keyword radar никогда не отвечает под чужими публикациями автоматически.
@@ -150,6 +167,35 @@ select private.invoke_edge_function('interaction-processor');
 Не выключайте режим до ручной проверки 100–200 классифицированных записей. После калибровки переход к реальным действиям выполняется отдельным явным решением.
 
 ## 6. Контент
+
+После применения миграций загрузите подтверждённый профиль Mononyx через SQL Editor:
+
+```sql
+-- Выполните весь файл supabase/seed_content_profile.sql.
+```
+
+Файл содержит только подтверждённые человеком факты, в том числе реальные стартовые цены: лендинг от 49 990 ₸, многостраничный сайт от 89 990 ₸ и WhatsApp/Telegram-бот от 200 000 ₸. Для мобильного приложения цена определяется после обсуждения. Любые другие цифры, сроки, показатели продаж, заявок и ROI генератору запрещены.
+
+Профиль задаёт пять ежедневных слотов по времени Алматы (`Asia/Almaty`, UTC+5): 09:00, 11:30, 14:30, 17:00 и 20:00. В базе они хранятся как 04:00, 06:30, 09:30, 12:00 и 15:00 UTC. При `SHADOW_MODE=true` функция `content-generator` создаёт записи со статусом `draft`; они не публикуются. После ручной проверки профиля, черновиков и классификации отдельное решение о выходе из shadow mode позволит генератору создавать `scheduled`-посты, а Content Poster опубликует их через официальный двухшаговый Threads API.
+
+Генератор планирует контент на ближайшие 14 дней, не дублирует уже созданные слоты и соблюдает лимит Threads в 500 символов. Чтобы лента не превращалась в повторы, он детерминированно чередует 15 ракурсов по услугам, проблемам аудитории, процессу работы и возражениям. Последние 25 публикаций передаются в Groq как контекст для подавления повторов. Перед сохранением код отдельно отклоняет неподтверждённые цифры, цену без слова «от», запрещённые ИИ-маркеры и искусственный контраст «не просто X, а Y». Ручная проверка запуска:
+
+```sql
+select private.invoke_edge_function('content-generator');
+
+select id, text, status, scheduled_at, origin, generation_key
+from public.content_queue
+where origin = 'ai_generated'
+order by created_at desc
+limit 20;
+```
+
+Политика ответов под собственными публикациями:
+
+- `lead` с уверенностью `medium` или `high` получает персонализированный мягкий ответ;
+- `lead` с `low`, `engagement`, `spam` и события с risk-флагами сохраняются для анализа, но бот их игнорирует;
+- Keyword Radar никогда не отвечает под чужими публикациями автоматически;
+- в `SHADOW_MODE=true` любые ответы остаются черновиками.
 
 Добавить текстовый пост в очередь:
 

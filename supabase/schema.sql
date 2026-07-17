@@ -18,6 +18,8 @@ create table if not exists public.content_queue (
   id uuid primary key default gen_random_uuid(),
   text text not null,
   media_url text,
+  origin text not null default 'manual',
+  generation_key text,
   status text not null default 'draft'
     check (status in ('draft', 'scheduled', 'publishing', 'published', 'failed', 'dead_letter')),
   scheduled_at timestamptz not null default now(),
@@ -31,8 +33,50 @@ create table if not exists public.content_queue (
   created_at timestamptz not null default now()
 );
 
+alter table public.content_queue
+  add column if not exists origin text not null default 'manual',
+  add column if not exists generation_key text;
+
+do $constraints$
+begin
+  if not exists (
+    select 1
+    from pg_catalog.pg_constraint
+    where conrelid = 'public.content_queue'::regclass
+      and conname = 'content_queue_origin_check'
+  ) then
+    alter table public.content_queue
+      add constraint content_queue_origin_check
+      check (origin in ('manual', 'ai_generated'));
+  end if;
+end;
+$constraints$;
+
 create index if not exists idx_content_queue_ready
   on public.content_queue (status, scheduled_at, next_retry_at);
+
+create unique index if not exists uq_content_queue_generation_key
+  on public.content_queue (generation_key);
+
+create table if not exists public.content_profiles (
+  id uuid primary key default gen_random_uuid(),
+  business_context text not null
+    check (char_length(trim(business_context)) between 100 and 20000),
+  target_audience text not null
+    check (char_length(trim(target_audience)) between 20 and 5000),
+  tone_of_voice text not null
+    check (char_length(trim(tone_of_voice)) between 10 and 2000),
+  publish_times_utc time without time zone[] not null
+    default array['12:00'::time without time zone],
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  constraint content_profiles_publish_times_check
+    check (cardinality(publish_times_utc) between 1 and 10)
+);
+
+create unique index if not exists uq_content_profiles_single_active
+  on public.content_profiles (is_active)
+  where is_active = true;
 
 create table if not exists public.interactions (
   id uuid primary key default gen_random_uuid(),
@@ -68,16 +112,20 @@ create index if not exists idx_interactions_is_lead
   where is_lead = true;
 
 alter table public.content_queue enable row level security;
+alter table public.content_profiles enable row level security;
 alter table public.interactions enable row level security;
 
 -- All application access is server-to-server via service_role. There are intentionally
 -- no anon/authenticated RLS policies.
 revoke all on table public.content_queue from anon, authenticated;
+revoke all on table public.content_profiles from anon, authenticated;
 revoke all on table public.interactions from anon, authenticated;
 revoke all on table public.content_queue from service_role;
+revoke all on table public.content_profiles from service_role;
 revoke all on table public.interactions from service_role;
 grant usage on schema public to service_role;
 grant select, insert, update on table public.content_queue to service_role;
+grant select, insert, update on table public.content_profiles to service_role;
 grant select, insert, update on table public.interactions to service_role;
 
 create or replace function public.claim_interactions(

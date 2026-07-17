@@ -42,5 +42,5 @@ Deno.test("ambiguous text is delegated to Groq evidence", async () => {
   const result = await new Classifier(groq).classify("Что вы думаете об этом?");
   assertEquals(result.intent, "engagement");
   assertEquals(result.confidenceLevel, "medium");
-  assertEquals(result.botReplyText, "Спасибо за вопрос!");
+  assertEquals(result.botReplyText, null);
 });

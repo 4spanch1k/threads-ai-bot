@@ -1,9 +1,15 @@
 project_id = "threads-ai-bot"
 
+[functions.interaction-poller]
+verify_jwt = false
+
 [functions.interaction-processor]
 verify_jwt = false
 
 [functions.content-poster]
+verify_jwt = false
+
+[functions.content-generator]
 verify_jwt = false
 
 [functions.keyword-radar]

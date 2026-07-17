@@ -142,6 +142,7 @@ export class Classifier {
   constructor(
     private readonly groq: Pick<GroqClient, "classify">,
     private readonly whatsappContactLink = "",
+    private readonly businessContext = "",
   ) {}
 
   async classify(text: string): Promise<Classification> {
@@ -156,31 +157,24 @@ export class Classifier {
     }
     if (localScores.spam >= 4) return this.result("spam", localSignals, [], "high", null);
     if (localScores.lead >= 5) {
-      return this.result("lead", localSignals, [], "high", this.leadReply());
+      return this.result("lead", localSignals, [], "high", await this.leadReply(text));
     }
     if (localScores.lead >= 3 && localScores.lead > localScores.engagement) {
-      return this.result("lead", localSignals, [], "medium", this.leadReply());
+      return this.result("lead", localSignals, [], "medium", await this.leadReply(text));
     }
     if (localScores.engagement >= 4 && localScores.lead === 0) {
-      return this.result(
-        "engagement",
-        localSignals,
-        [],
-        "high",
-        "Спасибо! Рады, что было полезно 🙌",
-      );
+      return this.result("engagement", localSignals, [], "high", null);
     }
 
-    const evidence = await this.groq.classify(text);
+    const evidence = await this.groq.classify(text, this.businessContext);
     const combinedSignals = new Set([...localSignals, ...evidence.signals]);
     const combinedRisks = new Set([...localRisks, ...evidence.riskFlags]);
     const combinedScores = scores(combinedSignals);
     combinedScores[evidence.intent] += 1;
     const winner = winningIntent(combinedScores);
     let reply: string | null = null;
-    if (combinedRisks.size === 0) {
-      if (winner === "lead") reply = this.leadReply();
-      if (winner === "engagement") reply = evidence.proposedReply ?? "Спасибо за комментарий!";
+    if (combinedRisks.size === 0 && winner === "lead") {
+      reply = this.withContact(evidence.proposedReply ?? this.defaultLeadReply());
     }
 
     return this.result(
@@ -192,11 +186,37 @@ export class Classifier {
     );
   }
 
-  private leadReply(): string {
+  private async leadReply(text: string): Promise<string> {
+    if (this.businessContext.trim()) {
+      try {
+        const evidence = await this.groq.classify(text, this.businessContext);
+        if (
+          evidence.intent === "lead" &&
+          evidence.riskFlags.length === 0 &&
+          evidence.proposedReply
+        ) {
+          return this.withContact(evidence.proposedReply);
+        }
+      } catch {
+        console.warn(JSON.stringify({ event: "personalized_reply_fallback" }));
+      }
+    }
+    return this.withContact(this.defaultLeadReply());
+  }
+
+  private defaultLeadReply(): string {
+    return "Похоже, здесь можем помочь. Напишите пару деталей — спокойно посмотрим задачу.";
+  }
+
+  private withContact(reply: string): string {
     const link = this.whatsappContactLink.trim();
-    return link
-      ? `Похоже, здесь можем помочь. Напишите пару деталей в WhatsApp — посмотрим задачу без навязчивых продаж: ${link}`
-      : "Похоже, здесь можем помочь. Напишите пару деталей — спокойно посмотрим задачу.";
+    const normalized = reply.trim();
+    if (!link || normalized.includes(link)) return Array.from(normalized).slice(0, 450).join("");
+
+    const suffix = ` Если удобно, детали можно отправить в WhatsApp: ${link}`;
+    const available = Math.max(0, 450 - Array.from(suffix).length);
+    const prefix = Array.from(normalized).slice(0, available).join("").trimEnd();
+    return `${prefix}${suffix}`;
   }
 
   private result(

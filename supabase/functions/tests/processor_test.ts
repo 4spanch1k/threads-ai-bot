@@ -62,3 +62,20 @@ Deno.test("risk flags notify an operator but suppress replies", () => {
   assertEquals(shouldReply(interaction(), risky), false);
   assertEquals(shouldNotify(risky), true);
 });
+
+Deno.test("medium and high own-post leads qualify for automatic replies", () => {
+  assertEquals(shouldReply(interaction(), lead), true);
+  assertEquals(shouldReply(interaction(), { ...lead, confidenceLevel: "medium" }), true);
+});
+
+Deno.test("low-confidence leads and engagement comments are ignored", () => {
+  assertEquals(shouldReply(interaction(), { ...lead, confidenceLevel: "low" }), false);
+  assertEquals(
+    shouldReply(interaction(), {
+      ...lead,
+      intent: "engagement",
+      confidenceLevel: "high",
+    }),
+    false,
+  );
+});

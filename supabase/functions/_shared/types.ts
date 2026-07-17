@@ -25,6 +25,14 @@ export interface ContentRow {
   container_id: string | null;
 }
 
+export interface ContentProfile {
+  id: string;
+  business_context: string;
+  target_audience: string;
+  tone_of_voice: string;
+  publish_times_utc: string[];
+}
+
 export interface Classification {
   intent: Intent;
   signals: string[];

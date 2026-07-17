@@ -12,8 +12,30 @@ export interface ThreadsSearchPost {
   timestamp?: string;
 }
 
-interface ThreadsSearchResponse {
-  data?: ThreadsSearchPost[];
+export interface ThreadsOwnPost {
+  id?: string;
+  timestamp?: string;
+  has_replies?: boolean;
+}
+
+export interface ThreadsReply {
+  id?: string;
+  text?: string;
+  username?: string;
+  timestamp?: string;
+  is_reply_owned_by_me?: boolean;
+}
+
+export interface ThreadsMention {
+  id?: string;
+  text?: string;
+  username?: string;
+  permalink?: string;
+  timestamp?: string;
+}
+
+interface ThreadsListResponse<T> {
+  data?: T[];
 }
 
 export class ThreadsClient {
@@ -81,12 +103,49 @@ export class ThreadsClient {
     searchMode: "KEYWORD" | "TAG",
     limit = 25,
   ): Promise<ThreadsSearchPost[]> {
-    const payload = await fetchJson<ThreadsSearchResponse>(
+    const payload = await fetchJson<ThreadsListResponse<ThreadsSearchPost>>(
       "Threads API",
       this.url("keyword_search", {
         q: query,
         search_type: searchType,
         search_mode: searchMode,
+        fields: "id,text,username,permalink,timestamp",
+        limit: String(limit),
+      }),
+      this.requestInit("GET"),
+    );
+    return Array.isArray(payload.data) ? payload.data : [];
+  }
+
+  async ownPosts(limit = 5): Promise<ThreadsOwnPost[]> {
+    const payload = await fetchJson<ThreadsListResponse<ThreadsOwnPost>>(
+      "Threads API",
+      this.url("me/threads", {
+        fields: "id,timestamp,has_replies",
+        limit: String(limit),
+      }),
+      this.requestInit("GET"),
+    );
+    return Array.isArray(payload.data) ? payload.data : [];
+  }
+
+  async replies(threadId: string, limit = 50): Promise<ThreadsReply[]> {
+    const payload = await fetchJson<ThreadsListResponse<ThreadsReply>>(
+      "Threads API",
+      this.url(`${threadId}/replies`, {
+        fields: "id,text,username,timestamp,is_reply_owned_by_me",
+        reverse: "true",
+        limit: String(limit),
+      }),
+      this.requestInit("GET"),
+    );
+    return Array.isArray(payload.data) ? payload.data : [];
+  }
+
+  async mentions(limit = 50): Promise<ThreadsMention[]> {
+    const payload = await fetchJson<ThreadsListResponse<ThreadsMention>>(
+      "Threads API",
+      this.url("me/mentions", {
         fields: "id,text,username,permalink,timestamp",
         limit: String(limit),
       }),

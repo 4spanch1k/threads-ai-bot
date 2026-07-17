@@ -10,7 +10,7 @@ declare
   function_signature text;
   function_oid regprocedure;
 begin
-  foreach table_name in array array['interactions', 'content_queue'] loop
+  foreach table_name in array array['interactions', 'content_queue', 'content_profiles'] loop
     if not exists (
       select 1
       from pg_catalog.pg_class as c

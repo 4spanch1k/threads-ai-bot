@@ -45,8 +45,8 @@ export function shouldReply(interaction: InteractionRow, classification: Classif
     classification.riskFlags.length > 0 ||
     classification.intent === "spam"
   ) return false;
-  if (classification.intent === "lead") return classification.confidenceLevel === "high";
-  return classification.intent === "engagement" && classification.confidenceLevel === "high";
+  return classification.intent === "lead" &&
+    (classification.confidenceLevel === "medium" || classification.confidenceLevel === "high");
 }
 
 export function shouldNotify(classification: Classification): boolean {
@@ -144,12 +144,21 @@ export async function runInteractionProcessor(): Promise<JobResult> {
   const database = new SupabaseRestClient(requiredEnv("SUPABASE_URL"), supabaseAdminKey());
   const whatsappLink = optionalEnv("WHATSAPP_CONTACT_LINK") ?? "";
   if (!shadowMode && !whatsappLink) requiredEnv("WHATSAPP_CONTACT_LINK");
+  const contentProfile = await database.getActiveContentProfile();
+  const businessContext = contentProfile
+    ? [
+      contentProfile.business_context,
+      `Целевая аудитория: ${contentProfile.target_audience}`,
+      `Тон общения: ${contentProfile.tone_of_voice}`,
+    ].join("\n\n")
+    : "";
   const classifier = new Classifier(
     new GroqClient(
       requiredEnv("GROQ_API_KEY"),
       optionalEnv("GROQ_MODEL") ?? "llama-3.3-70b-versatile",
     ),
     whatsappLink,
+    businessContext,
   );
   const threads = shadowMode
     ? null
