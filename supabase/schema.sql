@@ -71,7 +71,7 @@ create table if not exists public.content_profiles (
   is_active boolean not null default true,
   created_at timestamptz not null default now(),
   constraint content_profiles_publish_times_check
-    check (cardinality(publish_times_utc) between 1 and 10)
+    check (cardinality(publish_times_utc) between 1 and 12)
 );
 
 create unique index if not exists uq_content_profiles_single_active

@@ -40,11 +40,18 @@ Mononyx — веб- и digital-агентство в Казахстане.
 Тупые, нерелевантные, рекламные и спам-комментарии игнорировать. Средним и горячим лидам отвечать по существу, мягко направляя к обсуждению задачи с человеком.
   $tone$,
   array[
-    '04:00'::time without time zone,
-    '06:30'::time without time zone,
-    '09:30'::time without time zone,
-    '12:00'::time without time zone,
-    '15:00'::time without time zone
+    '01:00'::time without time zone,
+    '03:00'::time without time zone,
+    '05:00'::time without time zone,
+    '07:00'::time without time zone,
+    '09:00'::time without time zone,
+    '11:00'::time without time zone,
+    '13:00'::time without time zone,
+    '15:00'::time without time zone,
+    '17:00'::time without time zone,
+    '19:00'::time without time zone,
+    '21:00'::time without time zone,
+    '23:00'::time without time zone
   ],
   true
 );
