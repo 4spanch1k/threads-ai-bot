@@ -1,80 +1,184 @@
+<div align="center">
+
 # Threads Lead Bot
 
-Серверная автоматизация для Threads-аккаунта Mononyx: приём replies, поиск коммерческих запросов, классификация лидов и публикация контента. Система работает без постоянного сервера и по умолчанию остаётся в обязательном `SHADOW_MODE=true`.
+### Growth-движок для Threads аккаунта Mononyx
+
+Находит интерес к услугам агентства, бережно отвечает на подходящие комментарии
+и передаёт тёплые диалоги человеку — без постоянного сервера и платной инфраструктуры.
+
+[![Supabase](https://img.shields.io/badge/Supabase-Postgres%20%2B%20Cron-3ECF8E?logo=supabase&logoColor=white)](https://supabase.com/)
+[![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-F38020?logo=cloudflare&logoColor=white)](https://workers.cloudflare.com/)
+[![Deno](https://img.shields.io/badge/Deno-Edge%20Functions-000000?logo=deno&logoColor=white)](https://deno.com/)
+[![Threads API](https://img.shields.io/badge/Meta-Threads%20API-000000?logo=threads&logoColor=white)](https://developers.facebook.com/docs/threads)
+[![Mode](https://img.shields.io/badge/Default-SHADOW__MODE%3Dtrue-8B5CF6)](#режимы-работы)
+
+[Архитектура](#архитектура) · [Запуск](#запуск) · [Контент](#контент) · [Проверка](#проверка) · [Безопасность](#безопасность)
+
+</div>
+
+> [!IMPORTANT]
+> По умолчанию внешние действия выключены: `SHADOW_MODE=true`. Бот может собирать, классифицировать и готовить черновики, но не публикует посты, не отвечает в Threads и не отправляет Telegram-уведомления. Перевод в активный режим — только отдельным решением владельца после проверки примеров.
+
+## Что делает бот
+
+Threads Lead Bot — не автономный продавец. Он помогает Mononyx быстрее заметить и квалифицировать интерес к услугам: сайтам, лендингам, мобильным приложениям и AI-автоматизации.
+
+| Сценарий | Поведение |
+| --- | --- |
+| Комментарий под своим постом | Сохраняет событие, оценивает намерение и готовит короткий уместный ответ. |
+| Упоминание аккаунта | Принимает через webhook или polling, затем отправляет в общую очередь. |
+| Коммерческая фраза в чужом посте | Keyword Radar находит публикацию и передаёт её оператору. Автоответов под чужими постами нет. |
+| Контент-план | Создаёт и публикует посты из очереди двумя шагами: container → publish. |
+| Тёплый лид | После разрешённого ответа в Threads отправляет оператору Telegram-уведомление с контекстом и ссылкой WhatsApp. |
+
+Бот не обещает позиции в поиске, сроки, продажи, ROI или результаты, которые нельзя подтвердить. Он также не придумывает цифры для кейсов и не ведёт сделку вместо человека.
 
 ## Архитектура
 
-```text
-Meta webhook -> Cloudflare Worker --------------------+
-                                                      |
-Supabase Cron -> Threads polling fallback ------------+-> Supabase interactions
-                                                      |           |
-                                                      |    Interaction Processor
-                                                      |           |
-                                                      +-> Groq / Threads / Telegram
+```mermaid
+flowchart TD
+    M["Meta Threads API"] -->|"webhook"| W["Cloudflare Worker"]
+    M -->|"polling fallback"| P["Interaction Poller"]
 
-Supabase Cron -> Content Generator -> content_queue -> Content Poster -> Threads
-Supabase Cron -> Keyword Radar -------------------------------> Supabase
+    W -->|"проверка подписи и idempotent ingestion"| DB[("Supabase Postgres")]
+    P -->|"replies + mentions"| DB
+
+    DB --> IP["Interaction Processor"]
+    DB --> CG["Content Generator"]
+    CG --> CQ[("content_queue")]
+    CQ --> CP["Content Poster"]
+    KR["Keyword Radar"] --> DB
+
+    IP -->|"только при SHADOW_MODE=false"| MR["Ответ в Threads"]
+    IP -->|"только при SHADOW_MODE=false"| TG["Telegram оператору"]
+    CP -->|"только при SHADOW_MODE=false"| MP["Публикация в Threads"]
 ```
 
-Cloudflare Worker остаётся основным проверенным ingestion-каналом. `interaction-poller` — резерв на случай, если Meta не доставляет production webhook: он раз в 5 минут читает replies к пяти последним собственным публикациям и mentions через официальный Threads API. Оба канала используют одинаковые детерминированные `source_item_id`, поэтому повторное получение события не создаёт дубль и не откатывает его статус. Supabase Cron запускает короткоживущие Edge Functions. Python-задания и GitHub Actions сохранены как ручной резерв, но автоматических GitHub-расписаний нет.
+### Доставка комментариев: два независимых пути
 
-## Структура
+Основной путь — webhook Meta → Cloudflare Worker. Worker проверяет `X-Hub-Signature-256` по исходным байтам запроса, нормализует событие и вставляет его в базу без повторов.
 
-- `worker/` — Cloudflare Worker и интеграционные тесты.
-- `supabase/schema.sql` — таблицы, индексы, RLS и атомарные RPC очередей.
-- `supabase/functions/` — Edge Functions на TypeScript/Deno и их тесты.
-- `supabase/migrations/` — инфраструктурные миграции для Cron и `pg_net`.
-- `supabase/cron_setup.sql` — безопасная установка расписаний.
-- `supabase/cron_teardown.sql` — удаление расписаний без удаления данных.
-- `bot/` — резервные Python-задания для ручного запуска.
-- `.github/workflows/` — только ручной резерв и ручной CI.
-- `config/keywords.json` — запросы Keyword Radar.
-
-## 1. База Supabase
-
-Для нового проекта целиком выполните `supabase/schema.sql` в SQL Editor, затем `supabase/verify_security.sql`. Второй скрипт завершится ошибкой, если публичные роли получили доступ, RLS выключен или права `service_role` настроены неверно.
-
-Схема:
-
-- запрещает доступ `anon` и `authenticated` по умолчанию;
-- разрешает серверный доступ только `service_role`;
-- получает задания только через атомарные `claim_interactions` и `claim_due_content` с `FOR UPDATE SKIP LOCKED`;
-- восстанавливает просроченные lease и переводит исчерпанные retry в `dead_letter`.
-
-## 2. Cloudflare Worker
-
-Требуется Node.js 24+.
-
-```bash
-cd worker
-npm ci
-npx wrangler login
-npx wrangler secret put META_APP_SECRET
-npx wrangler secret put META_WEBHOOK_VERIFY_TOKEN
-npx wrangler secret put SUPABASE_URL
-npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
-npm run deploy:dry
-npm run deploy
-```
-
-Endpoints после деплоя:
+Если Meta не доставила webhook, `interaction-poller` раз в пять минут читает ответы к последним пяти собственным постам и до 50 упоминаний через официальный Threads API. Оба пути используют один ключ дедупликации:
 
 ```text
-Webhook:             https://<worker-name>.<account>.workers.dev/webhook
-OAuth redirect:      https://<worker-name>.<account>.workers.dev/oauth/callback
-Deauthorize callback:https://<worker-name>.<account>.workers.dev/oauth/deauthorize
-Data deletion:       https://<worker-name>.<account>.workers.dev/data-deletion
-OAuth start:         https://<worker-name>.<account>.workers.dev/oauth/start
+reply:<id>
+mention:<id>
+keyword_search:<id>
 ```
 
-В Meta Webhooks используйте тот же `META_WEBHOOK_VERIFY_TOKEN`. Worker проверяет `X-Hub-Signature-256` по исходным байтам тела до разбора JSON.
+Поэтому повторная доставка или пересечение polling и webhook не создаёт второй лид. Обычная задержка polling-сценария — до пяти минут плюс время следующего запуска процессора.
 
-`LOG_WEBHOOK_PAYLOADS=true` разрешается включать только на время сверки реального тестового события. После проверки сразу верните `false`: payload может содержать персональные данные.
+## Стек
 
-## 3. Edge Functions и секреты
+| Слой | Технология | Зона ответственности |
+| --- | --- | --- |
+| Приём webhook | Cloudflare Workers | Подпись Meta, нормализация и быстрая запись события. |
+| База и очереди | Supabase Postgres | Таблицы, RLS, дедупликация, leases, retry и RPC-claim. |
+| Фоновые задачи | Supabase Edge Functions + Cron | Polling, обработка лидов, генерация и публикация контента, keyword radar. |
+| Интеллект | Groq | Классификация неоднозначных событий и черновики в рамках профиля бренда. |
+| Оператор | Telegram Bot API | Уведомления о подходящих лидах. |
+| Ручной резерв | Python + GitHub Actions | Только `workflow_dispatch`; не нужен для постоянной работы бота. |
 
-Установите Supabase CLI, войдите и привяжите репозиторий к проекту:
+Система не требует постоянно включённого Mac и не зависит от планового GitHub Actions.
+
+## Структура репозитория
+
+```text
+.
+├── worker/                         # Cloudflare Worker и интеграционные тесты
+├── supabase/
+│   ├── functions/                  # Edge Functions на TypeScript / Deno
+│   │   ├── interaction-poller/
+│   │   ├── interaction-processor/
+│   │   ├── content-generator/
+│   │   ├── content-poster/
+│   │   └── keyword-radar/
+│   ├── migrations/                 # История изменений БД
+│   ├── schema.sql                  # Полная схема, RLS и RPC очередей
+│   ├── verify_security.sql         # Проверка RLS, grants и прав RPC
+│   ├── cron_setup.sql              # Расписание Supabase Cron
+│   └── seed_content_profile.sql    # Профиль бренда и контент-правила
+├── bot/                            # Ручной Python-резерв
+├── config/keywords.json            # Фразы для Keyword Radar
+├── tests/                          # Python-тесты
+└── .github/workflows/              # Ручной CI и резервные workflow
+```
+
+## Поток обработки лида
+
+```mermaid
+sequenceDiagram
+    participant U as Пользователь Threads
+    participant T as Threads API
+    participant I as Ingestion
+    participant D as Supabase
+    participant P as Interaction Processor
+    participant O as Оператор
+
+    U->>T: Комментарий под постом Mononyx
+    T->>I: Webhook или polling-обнаружение
+    I->>D: UPSERT source_item_id, статус received
+    P->>D: Атомарно claim через RPC
+    P->>P: Правила → Groq для неоднозначного случая
+    P->>D: intent, confidence, risk flags, черновик
+    alt SHADOW_MODE=false и это подходящий лид
+        P->>T: Короткий ответ с мягким CTA
+        P->>O: Telegram: контекст + ссылка WhatsApp
+    else Shadow mode или не-лид
+        P->>D: Сохраняет классификацию без внешнего действия
+    end
+```
+
+### Правила очередей
+
+- Очереди выдаются только через `claim_interactions` и `claim_due_content` с `FOR UPDATE SKIP LOCKED`.
+- Незавершённая обработка возвращается в работу после истечения lease.
+- Повторные попытки используют exponential backoff `2^attempts` минут; после лимита запись попадает в `dead_letter`.
+- Публикация контента всегда двухэтапная: сначала сохраняется `container_id`, затем выполняется publish. Это уменьшает риск двойного создания container после сбоя.
+
+## Контент
+
+Контент-генератор пишет по профилю Mononyx на русском языке для малого и среднего бизнеса Казахстана. Голос — от лица человека, а не безличной компании: коротко, конкретно и без искусственно гладкого «ИИ-тона».
+
+### Услуги и стартовые цены
+
+| Услуга | Формулировка |
+| --- | --- |
+| Лендинг | от 49 990 ₸ |
+| Многостраничный сайт | от 89 990 ₸ |
+| WhatsApp / Telegram-бот | от 200 000 ₸ |
+| Мобильное приложение | стоимость после обсуждения задачи |
+
+### Как строятся посты
+
+- Первая фраза — самостоятельный и честный хук: тезис, вопрос, личное наблюдение или конкретная деталь.
+- Хук соответствует содержанию поста. Кликбейт запрещён.
+- Один пост — одна мысль и один CTA-вопрос, который естественно приглашает к комментарию.
+- Личный кейс, результат или число используются только если они явно подтверждены профилем бренда. Бот не генерирует метрики, сроки и достижения самостоятельно.
+- Нет обещаний топа Google, гарантированных заявок, сроков, ROI и скрытых расходов.
+- Никаких прямых «пишите в WhatsApp/директ» в автопостах: комментарии дают материал для аккуратной квалификации.
+
+Планируется пять слотов ежедневно по времени Алматы (UTC+5): **09:00, 11:30, 14:30, 17:00 и 20:00**. В базе это соответственно `04:00`, `06:30`, `09:30`, `12:00`, `15:00` UTC.
+
+Генератор готовит очередь на 14 дней и берёт недавние публикации в контекст, чтобы не повторять подряд тему и тип хука.
+
+## Режимы работы
+
+| Режим | Что происходит |
+| --- | --- |
+| `SHADOW_MODE=true` | Ингест, классификация и черновики работают. Внешних ответов, Telegram-уведомлений и публикаций нет. |
+| `SHADOW_MODE=false` | Разрешённые сценарии могут ответить под собственным постом, уведомить оператора и опубликовать контент из очереди. Keyword Radar всё равно не отвечает под чужими постами. |
+
+Перед отключением shadow mode соберите и разметьте реальные примеры: что является лидом, что engagement, что spam и где ответ действительно уместен.
+
+## Запуск
+
+### 1. Supabase: схема и защита
+
+Создайте проект Supabase и примените актуальную схему из [`supabase/schema.sql`](supabase/schema.sql). Затем обязательно выполните [`supabase/verify_security.sql`](supabase/verify_security.sql) в SQL Editor: этот скрипт не изменяет данные, а завершится ошибкой, если RLS, grants или права RPC настроены неверно.
+
+Для работы с проектом локально:
 
 ```bash
 npx supabase login
@@ -82,35 +186,58 @@ npx supabase link --project-ref <project-ref>
 npx supabase db push
 ```
 
-После `db push` снова выполните `supabase/verify_security.sql` в SQL Editor: он дополнительно проверит, что приватную Cron-функцию нельзя вызвать через роли Data API.
+Профиль контента загружается из [`supabase/seed_content_profile.sql`](supabase/seed_content_profile.sql). Не помещайте ключи проекта или токены в SQL-файлы и коммиты.
 
-Создайте локальный файл `supabase/.env.functions`. Он игнорируется Git и должен содержать только реальные значения для Edge Functions:
+### 2. Cloudflare Worker: webhook и OAuth callback
+
+Для Worker нужен Node.js 24+.
+
+В каталоге `worker/` установите зависимости и добавьте секреты через интерактивный ввод:
+
+```bash
+cd worker
+npm ci
+npx wrangler secret put META_APP_SECRET
+npx wrangler secret put META_WEBHOOK_VERIFY_TOKEN
+npx wrangler secret put SUPABASE_URL
+npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+npx wrangler deploy
+```
+
+После deploy укажите в Meta URLs развёрнутого Worker:
+
+| Назначение | URL |
+| --- | --- |
+| Webhook callback | `https://<worker>.<account>.workers.dev/webhook` |
+| OAuth redirect | `https://<worker>.<account>.workers.dev/oauth/callback` |
+| Deauthorize callback | `https://<worker>.<account>.workers.dev/oauth/deauthorize` |
+| Data deletion callback | `https://<worker>.<account>.workers.dev/data-deletion` |
+
+Для проверки webhook Meta использует тот же `META_WEBHOOK_VERIFY_TOKEN`, который задан как Cloudflare Secret. `LOG_WEBHOOK_PAYLOADS` оставляйте выключенным; временно включать его можно только для короткой диагностики настоящего тестового события и без сохранения raw payload.
+
+### 3. Supabase Edge Functions: секреты и deploy
+
+Создайте локальный файл `supabase/.env.functions` по примеру [`.env.example`](.env.example). Файл игнорируется Git и остаётся только на вашей машине.
 
 ```dotenv
-CRON_SECRET=<длинная случайная строка>
-THREADS_ACCESS_TOKEN=<token>
-THREADS_USER_ID=<id>
-GROQ_API_KEY=<key>
-GROQ_MODEL=llama-3.3-70b-versatile
-TELEGRAM_BOT_TOKEN=<token>
-TELEGRAM_CHAT_ID=<id>
-WHATSAPP_CONTACT_LINK=https://wa.me/77000000000
+CRON_SECRET=<случайная строка длиной не менее 32 символов>
+THREADS_ACCESS_TOKEN=<токен Threads тестера или рабочего аккаунта>
+THREADS_USER_ID=<id аккаунта Threads>
+GROQ_API_KEY=<ключ Groq>
+GROQ_MODEL=<модель Groq>
+TELEGRAM_BOT_TOKEN=<токен бота>
+TELEGRAM_CHAT_ID=<id чата оператора>
+WHATSAPP_CONTACT_LINK=https://wa.me/<номер_без_plus>
 SHADOW_MODE=true
-OWN_THREADS_USERNAME=mononyx
+OWN_THREADS_USERNAME=<username без @>
 CONTENT_GENERATION_BATCH_SIZE=7
 ```
 
-Не присылайте значения в чат и не вводите секрет прямо в аргумент команды. Загрузите файл целиком:
+Загрузите секреты и разверните функции:
 
 ```bash
 npx supabase secrets set --env-file supabase/.env.functions
-```
 
-`SUPABASE_URL` и `SUPABASE_SERVICE_ROLE_KEY` Supabase автоматически предоставляет размещённым Edge Functions. Не добавляйте service role key в клиентский код.
-
-Задеплойте пять функций:
-
-```bash
 npx supabase functions deploy interaction-poller --no-verify-jwt
 npx supabase functions deploy interaction-processor --no-verify-jwt
 npx supabase functions deploy content-generator --no-verify-jwt
@@ -118,110 +245,64 @@ npx supabase functions deploy content-poster --no-verify-jwt
 npx supabase functions deploy keyword-radar --no-verify-jwt
 ```
 
-Публичная JWT-проверка отключена намеренно: каждый endpoint принимает только `POST` с отдельным заголовком `x-cron-secret`, который сравнивается с `CRON_SECRET`. Значение должно содержать минимум 32 случайных символа и использоваться только для Cron.
+`SUPABASE_URL` и `SUPABASE_SERVICE_ROLE_KEY` в хостинговых Edge Functions предоставляет Supabase. Service role никогда не попадает во frontend, Telegram, Threads, лог или README.
 
-## 4. Supabase Vault и Cron
+У этих внутренних функций встроенная JWT-проверка отключена намеренно: каждый endpoint принимает только `POST` с заголовком `x-cron-secret`, который сверяется с `CRON_SECRET` в постоянном времени. Не передавайте этот секрет через URL, не публикуйте его и не заменяйте эту проверку открытым endpoint.
 
-В Supabase Dashboard откройте Database → Vault и создайте два секрета:
+### 4. Supabase Vault и Cron
 
-- `project_url` — `https://<project-ref>.supabase.co`;
-- `cron_secret` — в точности то же значение, что записано в `CRON_SECRET` Edge Functions.
+Перед применением [`supabase/cron_setup.sql`](supabase/cron_setup.sql) добавьте в Supabase Vault два секрета:
 
-Не помещайте значения в репозиторий или чат. После создания секретов выполните `supabase/cron_setup.sql` в SQL Editor. Скрипт проверит Vault, заменит только расписания этого проекта и установит:
+| Vault secret | Значение |
+| --- | --- |
+| `project_url` | `https://<project-ref>.supabase.co` |
+| `cron_secret` | То же значение, что и `CRON_SECRET` у Edge Functions |
 
-- Interaction Poller — каждые 5 минут, начиная с 1-й минуты часа;
-- Interaction Processor — каждые 5 минут, через минуту после poller;
-- Content Generator — каждые 6 часов на 39-й минуте;
-- Content Poster — на 13/28/43/58 минуте;
-- Keyword Radar — каждые 3 часа на 23-й минуте.
+После этого выполните `supabase/cron_setup.sql` в SQL Editor. Расписание намеренно смещено от круглых минут:
 
-Проверка установки находится в последнем `SELECT` скрипта. Для остановки расписаний без удаления функций и данных выполните `supabase/cron_teardown.sql`.
+| Задача | Cron | Назначение |
+| --- | --- | --- |
+| Interaction Poller | `1,6,11,16,21,26,31,36,41,46,51,56 * * * *` | Резервный сбор replies и mentions. |
+| Interaction Processor | `2,7,12,17,22,27,32,37,42,47,52,57 * * * *` | Классификация, retries и разрешённые действия. |
+| Content Generator | `39 */6 * * *` | Пополнение очереди публикаций. |
+| Content Poster | `13,28,43,58 * * * *` | Публикация готовых записей. |
+| Keyword Radar | `23 */3 * * *` | Поиск коммерческих публикаций и операторский алерт. |
 
-После установки вручную вызовите безопасный processor и проверьте Edge Function Logs:
+Для безопасной паузы всех задач используйте [`supabase/cron_teardown.sql`](supabase/cron_teardown.sql). Не удаляйте таблицы или секреты ради остановки Cron.
 
-```sql
-select private.invoke_edge_function('interaction-processor');
-```
+### Ручной резерв через GitHub Actions
 
-Ожидаемый результат — числовой request id, затем запись `job_complete` в логах функции. Сам `CRON_SECRET` в логи не выводится.
+Workflow в [`.github/workflows/`](.github/workflows/) — это резервный способ запустить Python-задачи вручную через `workflow_dispatch`. Он не участвует в постоянной работе бота. Если используете резерв, храните его секреты только в GitHub Secrets и не дублируйте их в коде.
 
-Для отдельной проверки polling fallback вызовите:
+### 5. Meta и Threads
 
-```sql
-select private.invoke_edge_function('interaction-poller');
-```
+1. Добавьте аккаунт Threads в роль **Threads Tester** и примите приглашение в настройках разрешений аккаунта Threads.
+2. Включите нужные разрешения use case `Access the Threads API`: `threads_basic`, `threads_content_publish`, `threads_keyword_search`, `threads_manage_mentions`, `threads_manage_replies`, `threads_read_replies`.
+3. В разделе **Webhooks with Threads** добавьте callback URL Worker, verify token и подпишитесь на `replies` и `mentions`.
+4. Сначала выполните проверку на тестовом посте и комментарии при `SHADOW_MODE=true`.
 
-Poller не классифицирует события и не выполняет внешних действий. Он только вставляет новые `reply:<id>` и `mention:<id>` в `interactions`; обработка остаётся в существующем processor. При расписании из `cron_setup.sql` типичная задержка между новым комментарием и запуском processor составляет 1–6 минут. Poller ограничен пятью последними собственными публикациями и 50 свежими событиями на запрос, чтобы не расходовать API-вызовы без необходимости.
+## Проверка
 
-## 5. Shadow mode
+Документационные изменения не заменяют проверку кода. Перед изменением соответствующей подсистемы используйте нужный набор команд.
 
-Пока `SHADOW_MODE=true`:
-
-- interaction poller читает replies/mentions и безопасно сохраняет только новые события;
-- processor сохраняет классификацию и черновик, но не отвечает в Threads и не отправляет Telegram;
-- content generator создаёт только черновики AI-постов и не планирует их публикацию;
-- content poster не получает задания из очереди и ничего не публикует;
-- keyword radar только читает публичный поиск и сохраняет найденные посты;
-- keyword radar никогда не отвечает под чужими публикациями автоматически.
-
-Не выключайте режим до ручной проверки 100–200 классифицированных записей. После калибровки переход к реальным действиям выполняется отдельным явным решением.
-
-## 6. Контент
-
-После применения миграций загрузите подтверждённый профиль Mononyx через SQL Editor:
-
-```sql
--- Выполните весь файл supabase/seed_content_profile.sql.
-```
-
-Файл содержит только подтверждённые человеком факты, в том числе реальные стартовые цены: лендинг от 49 990 ₸, многостраничный сайт от 89 990 ₸ и WhatsApp/Telegram-бот от 200 000 ₸. Для мобильного приложения цена определяется после обсуждения. Любые другие цифры, сроки, показатели продаж, заявок и ROI генератору запрещены.
-
-Профиль задаёт пять ежедневных слотов по времени Алматы (`Asia/Almaty`, UTC+5): 09:00, 11:30, 14:30, 17:00 и 20:00. В базе они хранятся как 04:00, 06:30, 09:30, 12:00 и 15:00 UTC. При `SHADOW_MODE=true` функция `content-generator` создаёт записи со статусом `draft`; они не публикуются. После ручной проверки профиля, черновиков и классификации отдельное решение о выходе из shadow mode позволит генератору создавать `scheduled`-посты, а Content Poster опубликует их через официальный двухшаговый Threads API.
-
-Генератор планирует контент на ближайшие 14 дней, не дублирует уже созданные слоты и соблюдает лимит Threads в 500 символов. Чтобы лента не превращалась в повторы, он детерминированно чередует 15 ракурсов по услугам, проблемам аудитории, процессу работы и возражениям. Последние 25 публикаций передаются в Groq как контекст для подавления повторов. Перед сохранением код отдельно отклоняет неподтверждённые цифры, цену без слова «от», запрещённые ИИ-маркеры и искусственный контраст «не просто X, а Y». Ручная проверка запуска:
-
-```sql
-select private.invoke_edge_function('content-generator');
-
-select id, text, status, scheduled_at, origin, generation_key
-from public.content_queue
-where origin = 'ai_generated'
-order by created_at desc
-limit 20;
-```
-
-Политика ответов под собственными публикациями:
-
-- `lead` с уверенностью `medium` или `high` получает персонализированный мягкий ответ;
-- `lead` с `low`, `engagement`, `spam` и события с risk-флагами сохраняются для анализа, но бот их игнорирует;
-- Keyword Radar никогда не отвечает под чужими публикациями автоматически;
-- в `SHADOW_MODE=true` любые ответы остаются черновиками.
-
-Добавить текстовый пост в очередь:
-
-```sql
-insert into public.content_queue (text, status, scheduled_at)
-values ('Текст публикации', 'scheduled', now() + interval '30 minutes');
-```
-
-Для изображения укажите публичный `media_url`. URL с расширением `.mp4`, `.mov` или `.webm` считается видео; остальные media URL считаются изображениями. Публикация начнётся только после явного переключения `SHADOW_MODE=false`.
-
-## 7. Ручной резерв через GitHub
-
-Workflows `Interaction Processor`, `Content Poster` и `Keyword Radar` запускаются только через `workflow_dispatch`. Расписаний в GitHub больше нет, поэтому работа бота не зависит от Actions, платёжного метода или включённого Mac.
-
-Если резерв нужен, GitHub Secrets остаются прежними, а Repository Variable `SHADOW_MODE` должна быть `true`.
-
-## 8. Локальные проверки
+### Python-резерв
 
 ```bash
 python3 -m compileall -q bot tests
 python3 -m unittest discover -s tests -v
+```
 
+### Edge Functions
+
+```bash
 deno fmt --check supabase/functions
 deno task --config supabase/functions/deno.json check
 deno task --config supabase/functions/deno.json test
+```
 
+### Cloudflare Worker
+
+```bash
 cd worker
 npm ci
 npm run typecheck
@@ -229,13 +310,33 @@ npm test
 npm run deploy:dry
 ```
 
+### Минимальный smoke test
+
+1. Оставьте `SHADOW_MODE=true`.
+2. Опубликуйте API-видимый пост в Threads и напишите под ним комментарий тестовым аккаунтом.
+3. Проверьте в `interactions` одну запись с ожидаемым `source_item_id` и статусом после обработки.
+4. Убедитесь, что во время shadow mode не появилось внешнего ответа, публикации или Telegram-сообщения.
+5. После разметки достаточного числа реальных примеров отдельно решите, можно ли включать внешние действия.
+
 ## Безопасность
 
-- Никогда не коммитьте `.env`, `.dev.vars`, токены и ключи.
-- Edge Functions защищены отдельным `CRON_SECRET`; его нет в URL и теле запроса.
-- Vault хранит URL проекта и Cron secret для `pg_net`.
-- Повторная доставка webhook не меняет существующую запись: используется `ON CONFLICT DO NOTHING`.
-- При ошибке ingestion Worker возвращает `503`, чтобы Meta повторил доставку.
-- Внешние действия выключены по умолчанию через `SHADOW_MODE=true`.
+- Webhook-подпись Meta проверяется **до** JSON-разбора и по raw body.
+- Повторное событие не меняет готовую запись: используется `INSERT ... ON CONFLICT DO NOTHING`.
+- `anon` и `authenticated` закрыты по default-deny; прикладной серверный доступ имеет только `service_role`.
+- Все секреты находятся в Cloudflare Secrets, Supabase Edge Function Secrets или GitHub Secrets для ручного резерва.
+- Не отправляйте токены, пароли, service role key или содержимое `.env.functions` в чат, issue, commit и логи.
+- После любых изменений RLS, grants или RPC запускайте `supabase/verify_security.sql`.
 
-Документация: [Supabase Scheduled Functions](https://supabase.com/docs/guides/functions/schedule-functions), [Supabase Cron](https://supabase.com/docs/guides/cron), [Edge Function Secrets](https://supabase.com/docs/guides/functions/secrets), [Edge Function Auth](https://supabase.com/docs/guides/functions/auth), [Cloudflare Workers](https://developers.cloudflare.com/workers/) и [официальный Threads API workspace](https://www.postman.com/meta/threads/overview).
+## Полезные ссылки
+
+- [Threads API — документация Meta](https://developers.facebook.com/docs/threads)
+- [Threads API — changelog](https://developers.facebook.com/docs/threads/changelog)
+- [Supabase Edge Functions](https://supabase.com/docs/guides/functions)
+- [Supabase Cron](https://supabase.com/docs/guides/cron)
+- [Cloudflare Workers](https://developers.cloudflare.com/workers/)
+
+---
+
+<div align="center">
+  <sub>Mononyx · Threads Lead Bot · Сделано для аккуратного поиска интереса, а не для спама.</sub>
+</div>
