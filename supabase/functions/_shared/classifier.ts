@@ -16,10 +16,16 @@ const SIGNAL_SCORES: Record<string, [Intent, number]> = {
 
 const LEAD_NEED_PHRASES = [
   "нужен сайт",
+  "нужен лендинг",
+  "нужен бот",
   "нужна разработка",
   "нужно приложение",
   "нужна автоматизация",
   "хочу сайт",
+  "хочу лендинг",
+  "хочу заказать",
+  "хотим сайт",
+  "нужно сделать сайт",
   "сделать сайт",
   "разработать сайт",
   "сайт керек",
@@ -62,6 +68,10 @@ const CONTACT_PHRASES = [
   "telegram",
 ];
 const NEGATIONS = ["не нужен", "не нужна", "не нужно", "не ищу"];
+const DIRECT_SERVICE_QUESTION =
+  /(?:сколько\s+стоит|какая\s+цена|стоимость|какой\s+срок|как\s+заказать|что\s+входит|что\s+нужно|чем\s+отличается|как\s+проходит|можно\s+(?:ли|подробнее)|сможете|возьм[её]тесь|вы\s+(?:делаете|разрабатываете|собираете|настраиваете))[^?]{0,160}\?/iu;
+const FIRST_PERSON_SERVICE_NEED =
+  /(?:^|[^\p{L}])(?:мне|нам|мы|я|хочу|хотим|планирую|планируем|у\s+нас)(?:$|[^\p{L}])[^.!?]{0,100}(?:сайт|лендинг|интернет-магазин|приложени\p{L}*|автоматизац\p{L}*|crm|бот\p{L}*|дизайн|разработк\p{L}*)/iu;
 const SPAM_PHRASES = [
   "заработок без вложений",
   "крипто сигнал",
@@ -108,6 +118,17 @@ export function localEvidence(text: string): { signals: Set<string>; risks: Set<
     signals.add("praise");
   }
   return { signals, risks };
+}
+
+export function isDirectCommercialMessage(text: string): boolean {
+  const { signals } = localEvidence(text);
+  if (signals.has("explicit_need") || signals.has("vendor_search")) return true;
+  if (FIRST_PERSON_SERVICE_NEED.test(text)) return true;
+  if (signals.has("service_interest") && DIRECT_SERVICE_QUESTION.test(text)) return true;
+
+  const asksCommercialDetail = text.includes("?") &&
+    (signals.has("pricing") || signals.has("timeline") || signals.has("contact_intent"));
+  return asksCommercialDetail;
 }
 
 function scores(signals: Iterable<string>): Record<Intent, number> {
@@ -167,8 +188,24 @@ export class Classifier {
     }
 
     const evidence = await this.groq.classify(text, this.businessContext);
-    const combinedSignals = new Set([...localSignals, ...evidence.signals]);
+    const directCommercialMessage = isDirectCommercialMessage(text);
+    const evidenceSignals = directCommercialMessage
+      ? evidence.signals
+      : evidence.signals.filter((signal) =>
+        signal !== "explicit_need" && signal !== "vendor_search" && signal !== "contact_intent"
+      );
+    const combinedSignals = new Set([...localSignals, ...evidenceSignals]);
     const combinedRisks = new Set([...localRisks, ...evidence.riskFlags]);
+    if (!directCommercialMessage && evidence.intent !== "spam") {
+      combinedSignals.add("conversation");
+      return this.result(
+        "engagement",
+        combinedSignals,
+        combinedRisks,
+        "high",
+        null,
+      );
+    }
     const combinedScores = scores(combinedSignals);
     combinedScores[evidence.intent] += 1;
     const winner = winningIntent(combinedScores);

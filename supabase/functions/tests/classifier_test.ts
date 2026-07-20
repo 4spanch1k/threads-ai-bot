@@ -41,6 +41,58 @@ Deno.test("ambiguous text is delegated to Groq evidence", async () => {
   };
   const result = await new Classifier(groq).classify("Что вы думаете об этом?");
   assertEquals(result.intent, "engagement");
-  assertEquals(result.confidenceLevel, "medium");
+  assertEquals(result.confidenceLevel, "high");
   assertEquals(result.botReplyText, null);
+});
+
+Deno.test("sarcastic paraphrase is not a lead even when Groq overclassifies it", async () => {
+  const groq = {
+    classify: () =>
+      Promise.resolve({
+        intent: "lead" as const,
+        signals: ["explicit_need", "service_interest"],
+        riskFlags: [],
+        proposedReply: "Давайте обсудим сайт.",
+      }),
+  };
+  const result = await new Classifier(groq).classify(
+    "Перевожу: у вас нет сайта или он настолько плох, что никто не покупает без менеджера",
+  );
+
+  assertEquals(result.intent, "engagement");
+  assertEquals(result.confidenceLevel, "high");
+  assertEquals(result.botReplyText, null);
+  assertEquals(result.signals.includes("explicit_need"), false);
+});
+
+Deno.test("a direct service question can remain a lead", async () => {
+  const groq = {
+    classify: () =>
+      Promise.resolve({
+        intent: "lead" as const,
+        signals: ["explicit_need", "service_interest"],
+        riskFlags: [],
+        proposedReply: "Да, делаем. Какой сайт вам нужен?",
+      }),
+  };
+  const result = await new Classifier(groq).classify("Вы делаете сайты для клиник?");
+
+  assertEquals(result.intent, "lead");
+  assertEquals(result.confidenceLevel, "high");
+});
+
+Deno.test("a clarifying question about service scope can remain a lead", async () => {
+  const groq = {
+    classify: () =>
+      Promise.resolve({
+        intent: "lead" as const,
+        signals: ["explicit_need", "service_interest"],
+        riskFlags: [],
+        proposedReply: "Сначала уточняем задачу и список страниц.",
+      }),
+  };
+  const result = await new Classifier(groq).classify("Что входит в разработку сайта?");
+
+  assertEquals(result.intent, "lead");
+  assertEquals(result.confidenceLevel, "high");
 });

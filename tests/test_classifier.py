@@ -49,6 +49,26 @@ class ClassifierTests(unittest.TestCase):
         self.assertIsNone(result.bot_reply_text)
         self.assertEqual(groq.calls, 0)
 
+    def test_sarcastic_paraphrase_is_not_a_lead(self) -> None:
+        groq = FakeGroq(
+            GroqEvidence(
+                "lead",
+                ("explicit_need", "service_interest"),
+                (),
+                "Давайте обсудим сайт.",
+            )
+        )
+        classifier = Classifier(groq)
+
+        result = classifier.classify(
+            "Перевожу: у вас нет сайта или он настолько плох, что никто не покупает без менеджера"
+        )
+
+        self.assertEqual(result.intent, "engagement")
+        self.assertEqual(result.confidence_level, "high")
+        self.assertIsNone(result.bot_reply_text)
+        self.assertNotIn("explicit_need", result.signals)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -4,7 +4,7 @@ import os
 from collections.abc import Mapping
 from typing import Any, Protocol
 
-from bot.classifier import Classifier
+from bot.classifier import Classifier, is_direct_commercial_message
 from bot.config import (
     GroqSettings,
     SupabaseSettings,
@@ -51,11 +51,14 @@ def existing_classification(interaction: Interaction) -> Classification | None:
 
 
 def should_reply(interaction: Interaction, classification: Classification) -> bool:
-    if interaction.source != "own_reply" or classification.risk_flags or classification.intent == "spam":
+    if (
+        interaction.source != "own_reply"
+        or classification.risk_flags
+        or classification.intent != "lead"
+        or classification.confidence_level != "high"
+    ):
         return False
-    if classification.intent == "lead":
-        return classification.confidence_level == "high"
-    return classification.intent == "engagement" and classification.confidence_level == "high"
+    return is_direct_commercial_message(interaction.comment_text)
 
 
 def should_notify(interaction: Interaction, classification: Classification) -> bool:

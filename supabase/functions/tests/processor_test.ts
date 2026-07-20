@@ -63,9 +63,19 @@ Deno.test("risk flags notify an operator but suppress replies", () => {
   assertEquals(shouldNotify(risky), true);
 });
 
-Deno.test("medium and high own-post leads qualify for automatic replies", () => {
+Deno.test("only high-confidence direct leads qualify for automatic replies", () => {
   assertEquals(shouldReply(interaction(), lead), true);
-  assertEquals(shouldReply(interaction(), { ...lead, confidenceLevel: "medium" }), true);
+  assertEquals(shouldReply(interaction(), { ...lead, confidenceLevel: "medium" }), false);
+  assertEquals(
+    shouldReply(
+      interaction({
+        comment_text:
+          "Перевожу: у вас нет сайта или он настолько плох, что никто не покупает без менеджера",
+      }),
+      lead,
+    ),
+    false,
+  );
 });
 
 Deno.test("live lead notification sounds like a human assistant", async () => {

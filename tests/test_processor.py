@@ -27,13 +27,13 @@ class FakeClassifier:
         )
 
 
-def interaction(*, source: str = "own_reply") -> Interaction:
+def interaction(*, source: str = "own_reply", text: str = "Нужен сайт") -> Interaction:
     return Interaction(
         id="interaction-1",
         source_item_id="reply:reply-1",
         source=source,
         event_type="reply",
-        comment_text="Нужен сайт",
+        comment_text=text,
         post_id="post-1",
         username="prospect",
         intent=None,
@@ -73,6 +73,19 @@ class ProcessorTests(unittest.TestCase):
         classification = Classification("engagement", (), ("complaint",), "high", None)
         self.assertFalse(should_reply(interaction(), classification))
         self.assertTrue(should_notify(interaction(), classification))
+
+    def test_sarcastic_comment_never_qualifies_for_reply(self) -> None:
+        classification = Classification(
+            "lead", ("explicit_need", "service_interest"), (), "high", "CTA"
+        )
+        sarcastic = interaction(
+            text="Перевожу: у вас нет сайта или он настолько плох, что никто не покупает"
+        )
+        self.assertFalse(should_reply(sarcastic, classification))
+
+    def test_medium_confidence_lead_is_manual_only(self) -> None:
+        classification = Classification("lead", ("explicit_need",), (), "medium", "CTA")
+        self.assertFalse(should_reply(interaction(), classification))
 
 
 if __name__ == "__main__":

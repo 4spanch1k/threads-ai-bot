@@ -23,6 +23,19 @@ const ALLOWED_RISKS = new Set([
 ]);
 
 const BANNED_COPY_MARKERS = [
+  "в современном мире",
+  "ни для кого не секрет",
+  "вы когда-нибудь задумывались",
+  "давайте разберёмся",
+  "важно понимать",
+  "ключевую роль",
+  "вывести бизнес на новый уровень",
+  "мощный инструмент продаж",
+  "уникальное решение",
+  "инновационный подход",
+  "открывает новые возможности",
+  "максимизировать эффективность",
+  "повысить узнаваемость",
   "играет важную роль",
   "является свидетельством",
   "подчёркивает",
@@ -36,6 +49,9 @@ const BANNED_COPY_MARKERS = [
   "кроме того",
   "таким образом",
   "стоит отметить",
+  "подводя итог",
+  "в заключение",
+  "готовы начать",
 ];
 
 const ALLOWED_LATIN_WORDS = new Set([
@@ -60,7 +76,7 @@ const PRICE_SERVICE_RULES: Record<string, { label: string; pattern: RegExp }> = 
 
 const PRICE_FOCUSED_ANGLE = /(?:цен|стоимост|бюджет|подрядчик|лендинг, а когда многостраничный)/iu;
 const OUTCOME_PROMISE =
-  /(?:принес[её]т|даст|обеспечит|увеличит|поднимет|привед[её]т)[\s\S]{0,60}(?:заявк|продаж|клиент|roi)/iu;
+  /(?:принес[её]т|принос\p{L}*|даст|обеспечит|увеличит|поднимет|привед[её]т)[\s\S]{0,60}(?:заявк|продаж|клиент|roi)/iu;
 const GUARANTEED_BUSINESS_OUTCOME =
   /гарант\p{L}*[\s\S]{0,60}(?:продаж|заявк|клиент|рост|roi|окупаем)/iu;
 const SEARCH_RANKING_PROMISE =
@@ -79,10 +95,52 @@ const GENERIC_POST_PHRASES = [
   "контент и функционал",
   "слишком много кликать",
   "как будет обеспечена поддержка",
+  "для бизнеса в казахстане",
+  "какую основную цель вы хотели бы видеть",
+  "какую основную проблему вы хотели бы решить",
+  "потенциальный лендинг",
+  "под задачу бизнеса",
+  "пользовательский путь",
+  "пользовательский сценарий",
+  "согласованную задачу",
 ];
 const ACQUISITION_CLAIM = /привлеч\p{L}*\s+(?:заявк|клиент)/iu;
 const SPLIT_NASKOLKO = /(?:^|[^\p{L}])на\s+сколько\s+(?:глубоко|быстро|удобно)(?:$|[^\p{L}])/iu;
 const AMBIGUOUS_BOT_HOURS = /(?:^|[^\p{L}])после\s+часа\s+работы\s+бота(?:$|[^\p{L}])/iu;
+const SERVICE_MENTION =
+  /(?:лендинг|сайт|мобильн\p{L}*\s+приложени\p{L}*|(?:whatsapp|telegram)[\s/-]*бот|бот\p{L}*|автоматизац\p{L}*)/iu;
+const BUSINESS_TOPIC =
+  /(?:бизнес|предпринимател|клиент|покупател|заказчик|менеджер|заявк|запис|услуг|цен|директ|whatsapp|telegram)/iu;
+const GENERIC_ENGAGEMENT_QUESTION =
+  /(?:что\s+(?:вы\s+)?(?:об\s+этом\s+)?думаете|согласны(?:\s+со\s+мной)?|как\s+вам(?:\s+такой)?|насколько[\s\S]{0,80}важн\p{L}*[^?]{0,80})[?!.\s]*$/iu;
+const AGENCY_WORK =
+  /(?:мы|команд\p{L}*|агентств\p{L}*|mononyx{1,2})[\s\S]{0,240}(?:бер[её]м|дела\p{L}*|созда\p{L}*|собира\p{L}*|проектир\p{L}*|разрабатыва\p{L}*|настраива\p{L}*|пересобира\p{L}*|упроща\p{L}*|сокраща\p{L}*|фиксир\p{L}*|автоматизир\p{L}*|превраща\p{L}*|запуска\p{L}*|помога\p{L}*|начина\p{L}*|отда[её]\p{L}*|убира\p{L}*|счита\p{L}*|разбира\p{L}*)/iu;
+const SELLING_ANGLE = /формат:\s*продающ/iu;
+const ADVERTISING_EMOJI = /[🚀🔥✨🎯📈✅💡]/u;
+const EMOJI = /\p{Extended_Pictographic}/gu;
+const SEARCH_VERB_GRAMMAR_ERROR = /(?:что|где)\s+(?:вы\s+)?(?:обычно\s+)?ищите(?:$|[^\p{L}])/iu;
+const SIMILARITY_STOP_WORDS = new Set([
+  "будет",
+  "если",
+  "когда",
+  "который",
+  "можно",
+  "нужно",
+  "обычно",
+  "потом",
+  "потому",
+  "сами",
+  "сразу",
+  "только",
+  "чтобы",
+  "этого",
+  "этот",
+  "этой",
+  "очень",
+]);
+
+export const MIN_GENERATED_POST_CHARACTERS = 35;
+export const MAX_GENERATED_POST_CHARACTERS = 320;
 
 interface NumericMention {
   normalized: string;
@@ -101,11 +159,36 @@ function surroundingContext(text: string, index: number, radius = 120): string {
   return text.slice(Math.max(0, index - radius), Math.min(text.length, index + radius));
 }
 
+function postTokens(text: string): Set<string> {
+  const words = text.toLocaleLowerCase("ru").match(/[\p{L}\p{N}]+/gu) ?? [];
+  return new Set(
+    words.filter((word) => word.length >= 4 && !SIMILARITY_STOP_WORDS.has(word)),
+  );
+}
+
+export function isGeneratedPostTooSimilar(text: string, recentPosts: string[]): boolean {
+  const candidate = postTokens(text);
+  if (candidate.size < 3) return false;
+
+  return recentPosts.some((recentPost) => {
+    const recent = postTokens(recentPost);
+    if (recent.size < 3) return false;
+    let shared = 0;
+    for (const token of candidate) {
+      if (recent.has(token)) shared += 1;
+    }
+    return shared >= 3 && shared / Math.min(candidate.size, recent.size) >= 0.75;
+  });
+}
+
 export function assertGeneratedCopy(text: string, businessContext: string): void {
   const normalizedText = text.toLocaleLowerCase("ru");
   const marker = BANNED_COPY_MARKERS.find((value) => normalizedText.includes(value));
   if (marker) throw new Error(`Generated copy contains banned wording: ${marker}`);
   if (/не\s+просто\b[\s\S]{0,120}\bа\b/iu.test(text)) {
+    throw new Error("Generated copy contains a banned artificial contrast");
+  }
+  if (/(?:это\s+не|речь\s+не\s+о)\b[\s\S]{0,120}\bа\b/iu.test(text)) {
     throw new Error("Generated copy contains a banned artificial contrast");
   }
 
@@ -135,6 +218,20 @@ export function assertGeneratedCopy(text: string, businessContext: string): void
         );
       }
     }
+  }
+}
+
+export function assertGeneratedReplyCopy(text: string, businessContext: string): void {
+  assertGeneratedCopy(text, businessContext);
+
+  if (OUTCOME_PROMISE.test(text) || ACQUISITION_CLAIM.test(text)) {
+    throw new Error("Generated reply promises leads, clients, or sales");
+  }
+  if (GUARANTEED_BUSINESS_OUTCOME.test(text) || GUARANTEED_TIMELINE.test(text)) {
+    throw new Error("Generated reply contains an unsupported guarantee");
+  }
+  if (SEARCH_RANKING_PROMISE.test(text) || LEGAL_OR_FINANCIAL_GUARANTEE.test(text)) {
+    throw new Error("Generated reply contains an unsupported promise");
   }
 }
 
@@ -181,6 +278,10 @@ export function assertGeneratedPostCopy(
     throw new Error("Generated post contains an ambiguous bot-hours phrase");
   }
 
+  if (SEARCH_VERB_GRAMMAR_ERROR.test(text)) {
+    throw new Error("Generated post uses 'ищите' instead of 'ищете'");
+  }
+
   const normalizedText = text.toLocaleLowerCase("ru");
   const genericPhrase = GENERIC_POST_PHRASES.find((phrase) => normalizedText.includes(phrase));
   if (genericPhrase) {
@@ -194,33 +295,82 @@ export function assertGeneratedPostCopy(
     throw new Error("Generated post mentions prices outside a price-focused content angle");
   }
 
-  if (!text.trim().endsWith("?")) {
-    throw new Error("Generated post must end with one comment-oriented question");
+  if (Array.from(text).length > MAX_GENERATED_POST_CHARACTERS) {
+    throw new Error(`Generated post exceeds ${MAX_GENERATED_POST_CHARACTERS} characters`);
+  }
+
+  if (Array.from(text).length < MIN_GENERATED_POST_CHARACTERS) {
+    throw new Error(`Generated post is shorter than ${MIN_GENERATED_POST_CHARACTERS} characters`);
+  }
+
+  if (!SERVICE_MENTION.test(text) && !BUSINESS_TOPIC.test(text)) {
+    throw new Error("Generated post is outside the Mononyx business context");
+  }
+
+  if (GENERIC_ENGAGEMENT_QUESTION.test(text.trim())) {
+    throw new Error("Generated post ends with a generic engagement question");
+  }
+
+  const questionMarks = Array.from(text).filter((character) => character === "?").length;
+  if (questionMarks > 1) {
+    throw new Error("Generated post contains more than one question");
+  }
+
+  if (text.includes("—")) {
+    throw new Error("Generated post contains a long dash");
+  }
+
+  if (/#\p{L}+/u.test(text)) {
+    throw new Error("Generated post contains a hashtag");
+  }
+
+  const emojiCount = Array.from(text.matchAll(EMOJI)).length;
+  if (emojiCount > 2) {
+    throw new Error("Generated post contains more than two emoji");
+  }
+  if (ADVERTISING_EMOJI.test(text)) {
+    throw new Error("Generated post contains an advertising emoji");
+  }
+
+  const selling = SELLING_ANGLE.test(contentAngle);
+  if (selling && !AGENCY_WORK.test(text)) {
+    throw new Error("Selling post does not state what the agency does");
+  }
+  if (!selling && AGENCY_WORK.test(text)) {
+    throw new Error("Non-selling post contains an agency offer");
   }
 }
 
+export function normalizeGeneratedPostCopy(text: string, _contentAngle: string): string {
+  return text.trim();
+}
+
 export const POST_GENERATION_SYSTEM_PROMPT = [
-  "Ты редактор Threads для веб- и digital-агентства.",
-  "Напиши один самостоятельный пост на русском языке, который привлекает релевантных клиентов пользой, а не агрессивной продажей.",
-  "Первая фраза — хук: она должна работать сама по себе без предыдущего контекста и сразу давать читателю причину открыть пост после кнопки «Ещё».",
-  "Выбери один подходящий тип хука и не повторяй тип хука самого свежего поста: резкое или полемичное утверждение; реальная личная история с конкретным результатом; контрарианская подача; прямой вопрос аудитории; подтверждённое конкретное число; прямое обращение на «ты» или «вы».",
-  "Не используй один и тот же тип хука в двух постах подряд. Недавние посты передаются от самого нового к более старым, поэтому особенно сравни хук с пунктом 1.",
+  "Ты пишешь посты для Threads от лица живого человека из веб- и digital-агентства Mononyx в Казахстане. Агентство делает сайты, лендинги, мобильные приложения, AI-ботов и автоматизацию для бизнеса.",
+  "Твоя задача не создавать контент по шаблону, а замечать знакомые, спорные или смешные ситуации предпринимателей и коротко высказываться так, чтобы хотелось ответить, согласиться или возразить.",
+  "Одна публикация означает одну основную мысль. Пост может быть наблюдением, вопросом, спорным мнением, маленькой сценой или спокойным предложением услуги. Не пытайся совместить всё сразу.",
+  "Пиши по-русски от 35 до 320 символов с пробелами. Варьируй длину и устройство: одна сильная фраза, две-три короткие строки, маленькая сцена или конкретный вопрос. Не повторяй формат, тему и начало недавних постов.",
+  "Пиши как человек из современного интернета, а не копирайтер, преподаватель или корпоративный блог. Используй простые конкретные слова, короткие фразы и иногда разговорную шероховатость: «если честно», «по факту», «ну такое», «вот и думай». Не больше одного разговорного выражения на пост и не в каждом посте.",
+  "Показывай проблему через действие: клиент ищет цену, не находит кнопку, ждёт ответа, повторяет один вопрос или получает квест вместо записи. Не объясняй очевидное и не закрывай каждую мысль идеальным выводом.",
+  "Контентный ракурс содержит формат. Если формат наблюдение, обсуждение или мнение, не добавляй фразу о том, что делает Mononyx, и не продавай услугу. Если формат продающий, сначала покажи ситуацию, затем конкретную проблему, коротко скажи, что мы делаем, и дай один спокойный призыв.",
+  "Не продавай в каждом посте. Не перечисляй все услуги сразу. Не дави, не создавай дефицит и не обещай результат. Нормальные призывы для продающего формата: «Могу показать демо», «Если актуально, напишите», «Можем разобрать ваш случай».",
+  "Не заканчивай каждый пост вопросом. Если вопрос есть, он должен быть один, конкретный и такой, на который легко ответить из собственного опыта. Не используй «Что думаете?», «Согласны?» и «Как вам?» без контекста.",
+  "Используй от нуля до двух эмодзи только для реакции или иронии. Подходят 😅, 👀, 🙂, 🤝, 🫠, 😂, 🤔, 🥲, 👍. Не используй рекламный набор 🚀, 🔥, ✨, 🎯, 📈, ✅, 💡.",
+  "Не используй длинное тире, хэштеги, заголовок, формальный список и конструкцию «не просто X, а Y». Не группируй мысли по три ради красивой структуры.",
+  "Хороший ритм: конкретная сцена, короткий поворот, реакция или точный вопрос. Например: «Владелец бизнеса отвечает клиенту через несколько часов и думает: “Ну я же ответил”. Ответил. Только клиент уже написал другому 😅». Или: «Сайт красивый. Цена в соцсетях, адрес на картах, запись в WhatsApp. Клиент хотел записаться, а получил квест 🫠».",
   "Личную историю, результат, число, клиента или случай из практики можно использовать только когда этот факт прямо указан в профиле бизнеса. Если подтверждения нет, не имитируй личный опыт и не выдумывай историю.",
-  "Пиши голосом живого человека, а не пресс-релизом компании. Не пиши «Mononyx предлагает». Первое лицо «я» допустимо только для опыта, прямо подтверждённого профилем бизнеса.",
-  "После хука раскрой именно его обещание одной полезной мыслью или наблюдением. Хук не должен быть кликбейтом или обещать то, чего нет в самом посте.",
-  "В конце должен быть ровно один явный CTA: один короткий вопрос, на который предпринимателю удобно ответить в комментариях. Не проси подписаться, перейти по ссылке, написать в WhatsApp, Telegram или личные сообщения.",
   "Используй только факты из профиля бизнеса. Цены можно брать только из профиля и упоминать только с формулировкой «от». Не выдумывай другие цифры, кейсы, клиентов, сроки, личные истории и гарантии.",
-  "Упоминай цены только тогда, когда контентный ракурс прямо связан с ценой, стоимостью, бюджетом или выбором подрядчика. В остальных постах не перечисляй услуги и цены.",
-  "Каждую цену связывай с точной услугой в том же фрагменте текста: 49 990 ₸ — только лендинг, 89 990 ₸ — только многостраничный сайт, 200 000 ₸ — только WhatsApp/Telegram-бот. Для мобильного приложения числовую цену не называй.",
+  "Упоминай цены только тогда, когда контентный ракурс прямо связан с ценой, стоимостью или бюджетом. В остальных постах не называй цены.",
+  "Каждую цену связывай с точной услугой в том же фрагменте текста: 49 990 ₸ только для лендинга, 89 990 ₸ только для многостраничного сайта, 200 000 ₸ только для WhatsApp/Telegram-бота. Для мобильного приложения числовую цену не называй.",
   "Не обещай позиции или топ в Google и других поисковиках. Не гарантируй сроки, продажи, заявки, клиентов, рост, ROI или окупаемость. Не давай юридических и финансовых гарантий.",
   "Если упоминаешь рекламу, продвижение, платные API или другие дополнительные расходы, прямо скажи, что это отдельная статья расходов и она не входит в стоимость разработки.",
-  "Не пиши общие фразы «мы можем помочь» и «действительно работает». Давай конкретную проверку, наблюдение или вопрос по заданному ракурсу.",
-  "В посте должна быть хотя бы одна конкретная деталь, которую предприниматель сможет проверить или применить: элемент страницы, вопрос подрядчику, повторяющийся процесс или пример пользовательского действия. Не заменяй конкретику словами «контент», «функционал» и «получить результат».",
+  "Не пиши общие фразы «мы можем помочь» и «действительно работает». Не используй слова «цифровизация», «пользовательский сценарий», «пользовательский путь», «конверсия», «лидогенерация», «интеграция», «релевантный», «ключевой», «эффективный», «качественный» и «современный», если пользу можно показать действием. Не пиши «под задачу бизнеса» и «согласованная задача».",
   "Пиши «компании сферы услуг» или называй конкретную нишу. Не используй выражение «сервисный бизнес». Не используй слово «действительно».",
   "Перед ответом проверь русскую грамматику и отсутствие случайных латинских букв внутри русских слов. В вопросе о степени пиши «насколько» слитно. Не используй двусмысленную фразу «после часа работы бота» и канцелярскую конструкцию «как будет обеспечена поддержка».",
-  "Не пиши, что ты ИИ. Не используй кликбейт, канцелярит, самопересказ, искусственный контраст «не просто X, а Y», идеально отполированный рекламный тон и россыпь хэштегов.",
-  "Не используй выражения: «играет важную роль», «является свидетельством», «подчёркивает», «многогранный», «путешествие» как метафору, «по-настоящему», «безусловно», «более того», «кроме того», «таким образом», «стоит отметить».",
-  'Верни только JSON вида {"text":"..."}. Максимум 500 символов с пробелами.',
+  "Не пиши, что ты ИИ. Не используй кликбейт, канцелярит, самопересказ и идеально отполированный рекламный тон.",
+  "Не используй выражения: «в современном мире», «ни для кого не секрет», «вы когда-нибудь задумывались», «давайте разберёмся», «важно понимать», «играет важную роль», «является свидетельством», «подчёркивает», «многогранный», «путешествие» как метафору, «по-настоящему», «безусловно», «более того», «кроме того», «таким образом», «стоит отметить», «подводя итог», «в заключение», «готовы начать».",
+  "Перед ответом молча проверь: это похоже на настоящую мысль человека, есть ли конкретика, можно ли убрать лишнюю фразу, нет ли пафоса и выдуманных фактов, хочется ли ответить или возразить.",
+  'Верни только JSON вида {"text":"..."}. Не выходи за 320 символов с пробелами.',
 ].join(" ");
 
 export interface GroqClassification {
@@ -282,7 +432,10 @@ export class GroqClient {
       "intent: lead, engagement или spam.",
       "signals: explicit_need, vendor_search, pricing, timeline, contact_intent, service_interest, conversation, praise, promotion, irrelevant.",
       "risk_flags: aggression, complaint, legal, reputation, personal_data.",
+      "Lead — только когда автор говорит о своей текущей или планируемой задаче: явно ищет подрядчика, хочет заказать услугу, спрашивает цену, срок, состав услуги, как проходит работа, возможность или способ связаться.",
+      "Шутка, сарказм, пересказ чужой мысли, критика, спор, общее мнение и простое упоминание сайта или разработки — engagement, а не lead. Если коммерческое намерение неясно, выбирай engagement.",
       "Не выдумывай факты. proposed_reply должен быть живым, коротким, на одно-два предложения, мягким и без обещаний.",
+      "proposed_reply заполняй только для lead. Для engagement и spam всегда верни null.",
       "Не используй канцелярит, самопересказ, искусственный контраст «не просто X, а Y» и отполированный рекламный тон.",
       businessContext
         ? "Если это лид, составь proposed_reply только на основе контекста бизнеса ниже. Ответь по существу или задай один уточняющий вопрос. Цены можно брать только из контекста и упоминать только с формулировкой «от». Не придумывай другие цифры, сроки, кейсы и гарантии."
@@ -342,7 +495,7 @@ export class GroqClient {
       : null;
     if (proposedReply && businessContext) {
       try {
-        assertGeneratedCopy(proposedReply, businessContext);
+        assertGeneratedReplyCopy(proposedReply, businessContext);
       } catch (error) {
         proposedReply = null;
         console.warn(JSON.stringify({
@@ -387,7 +540,7 @@ export class GroqClient {
           body: JSON.stringify({
             model: this.model,
             temperature: 0.7,
-            max_completion_tokens: 500,
+            max_completion_tokens: 300,
             response_format: { type: "json_object" },
             messages: [
               { role: "system", content: system },
@@ -409,9 +562,14 @@ export class GroqClient {
       if (typeof parsed.text !== "string" || !parsed.text.trim()) {
         throw new Error("Groq API returned an empty generated post");
       }
-      const text = fitThreadsText(parsed.text);
-      if (Array.from(text).length < 40) {
-        rejectionReason = "пост короче 40 символов";
+      const text = fitThreadsText(
+        normalizeGeneratedPostCopy(parsed.text, request.contentAngle),
+        MAX_GENERATED_POST_CHARACTERS,
+      );
+      if (Array.from(text).length < MIN_GENERATED_POST_CHARACTERS) {
+        rejectionReason = `пост короче ${MIN_GENERATED_POST_CHARACTERS} символов`;
+      } else if (isGeneratedPostTooSimilar(text, request.recentPosts)) {
+        rejectionReason = "пост повторяет недавнюю публикацию по формулировке или смыслу";
       } else {
         try {
           assertGeneratedPostCopy(text, request.businessContext, request.contentAngle);

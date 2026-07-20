@@ -1,4 +1,4 @@
-import { Classifier } from "../_shared/classifier.ts";
+import { Classifier, isDirectCommercialMessage } from "../_shared/classifier.ts";
 import {
   envBoolean,
   envInteger,
@@ -43,10 +43,10 @@ export function shouldReply(interaction: InteractionRow, classification: Classif
   if (
     interaction.source !== "own_reply" ||
     classification.riskFlags.length > 0 ||
-    classification.intent === "spam"
+    classification.intent !== "lead" ||
+    classification.confidenceLevel !== "high"
   ) return false;
-  return classification.intent === "lead" &&
-    (classification.confidenceLevel === "medium" || classification.confidenceLevel === "high");
+  return isDirectCommercialMessage(interaction.comment_text);
 }
 
 export function shouldNotify(classification: Classification): boolean {

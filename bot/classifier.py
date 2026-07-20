@@ -26,10 +26,16 @@ SIGNAL_SCORES: dict[str, tuple[Intent, int]] = {
 
 LEAD_NEED_PHRASES = (
     "нужен сайт",
+    "нужен лендинг",
+    "нужен бот",
     "нужна разработка",
     "нужно приложение",
     "нужна автоматизация",
     "хочу сайт",
+    "хочу лендинг",
+    "хочу заказать",
+    "хотим сайт",
+    "нужно сделать сайт",
     "сделать сайт",
     "разработать сайт",
     "сайт керек",
@@ -59,6 +65,17 @@ PRICING_PHRASES = ("сколько стоит", "какая цена", "стои
 TIMELINE_PHRASES = ("срочно", "на этой неделе", "за месяц", "срок", "дедлайн", "шұғыл")
 CONTACT_PHRASES = ("напишите мне", "свяжитесь", "оставлю номер", "whatsapp", "телеграм", "telegram")
 NEGATIONS = ("не нужен", "не нужна", "не нужно", "не ищу")
+DIRECT_SERVICE_QUESTION = re.compile(
+    r"(?:сколько\s+стоит|какая\s+цена|стоимость|какой\s+срок|как\s+заказать|что\s+входит|"
+    r"что\s+нужно|чем\s+отличается|как\s+проходит|можно\s+(?:ли|подробнее)|"
+    r"сможете|возьм[её]тесь|вы\s+(?:делаете|разрабатываете|собираете|настраиваете))[^?]{0,160}\?",
+    re.IGNORECASE,
+)
+FIRST_PERSON_SERVICE_NEED = re.compile(
+    r"\b(?:мне|нам|мы|я|хочу|хотим|планирую|планируем|у\s+нас)\b[^.!?]{0,100}"
+    r"(?:сайт|лендинг|интернет-магазин|приложени\w*|автоматизац\w*|crm|бот\w*|дизайн|разработк\w*)",
+    re.IGNORECASE,
+)
 SPAM_PHRASES = (
     "заработок без вложений",
     "крипто сигнал",
@@ -105,6 +122,17 @@ def _local_signals(text: str) -> tuple[set[str], set[str]]:
     if _contains_any(normalized, ("круто", "отлично", "полезно", "спасибо", "супер")):
         signals.add("praise")
     return signals, risks
+
+
+def is_direct_commercial_message(text: str) -> bool:
+    signals, _ = _local_signals(text)
+    if {"explicit_need", "vendor_search"} & signals:
+        return True
+    if FIRST_PERSON_SERVICE_NEED.search(text):
+        return True
+    if "service_interest" in signals and DIRECT_SERVICE_QUESTION.search(text):
+        return True
+    return "?" in text and bool({"pricing", "timeline", "contact_intent"} & signals)
 
 
 def _scores(signals: Iterable[str]) -> dict[Intent, int]:
@@ -162,8 +190,15 @@ class Classifier:
             )
 
         evidence = self.groq.classify(text)
-        signals = local_signals | set(evidence.signals)
+        direct_commercial_message = is_direct_commercial_message(text)
+        evidence_signals = set(evidence.signals)
+        if not direct_commercial_message:
+            evidence_signals -= {"explicit_need", "vendor_search", "contact_intent"}
+        signals = local_signals | evidence_signals
         risks = local_risks | set(evidence.risk_flags)
+        if not direct_commercial_message and evidence.intent != "spam":
+            signals.add("conversation")
+            return self._result("engagement", signals, risks, "high", None)
         scores = _scores(signals)
         scores[evidence.intent] += 1
         winner = max(scores, key=scores.get)
@@ -172,8 +207,6 @@ class Classifier:
         if not risks:
             if winner == "lead":
                 reply = self._lead_reply()
-            elif winner == "engagement":
-                reply = evidence.proposed_reply or "Спасибо за комментарий!"
 
         return self._result(winner, signals, risks, confidence, reply)
 
